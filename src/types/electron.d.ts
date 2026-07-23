@@ -1,0 +1,128 @@
+export interface ProfileInfo {
+  name: string;
+  dir: string;
+  mods: number;
+  resourcepacks: number;
+  shaderpacks: number;
+  saves: number;
+}
+
+export interface MicrosoftAccount {
+  id: string;
+  username: string;
+  uuid: string;
+  type: "microsoft";
+  accessToken: string;
+  refreshToken: string;
+  createdAt: number;
+}
+
+export interface ElectronAPI {
+  isElectron: () => Promise<boolean>;
+  getUserDataPath: () => Promise<string>;
+  saveFile: (data: { defaultName: string; buffer: ArrayBuffer }) => Promise<
+    { success: true; filePath: string } | { success: false; error?: string }
+  >;
+  checkJava: () => Promise<{ exists: boolean; path?: string; version?: string }>;
+  launchMinecraftReal: (config: {
+    account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string };
+    version: string;
+    loader: string;
+    ram: number;
+    profile: string;
+    mods: { fileName: string; downloadsUrl: string }[];
+    server?: { host: string; port?: number };
+  }) => Promise<{ success: boolean; message: string }>;
+
+  // Профили
+  listProfiles: () => Promise<ProfileInfo[]>;
+  createProfile: (name: string) => Promise<{ name: string; dir: string }>;
+  renameProfile: (oldName: string, newName: string) => Promise<{
+    success: boolean;
+    oldName?: string;
+    newName?: string;
+    error?: string;
+  }>;
+  deleteProfile: (name: string) => Promise<{ success: boolean; error?: string }>;
+  openProfileFolder: (name: string) => Promise<{ success: boolean; dir: string }>;
+  openProfilesRoot: () => Promise<{ success: boolean; dir: string }>;
+
+  // Моды
+  downloadModToProfile: (data: {
+    profile: string;
+    fileName: string;
+    url: string;
+    subfolder?: string;
+  }) => Promise<{
+    success: boolean;
+    path?: string;
+    error?: string;
+  }>;
+
+  // Настройки главного экрана
+  openFileDialog: (data: { title?: string; filters?: { name: string; extensions: string[] }[]; multiple?: boolean }) => Promise<{
+    success: boolean;
+    paths?: string[];
+  }>;
+  readFileAsDataUrl: (filePath: string) => Promise<{
+    success: boolean;
+    dataUrl?: string;
+    error?: string;
+  }>;
+  saveDataUrl: (data: { dataUrl: string; defaultName?: string }) => Promise<{
+    success: boolean;
+    filePath?: string;
+  }>;
+  openGameDir: (profileName: string) => Promise<{ success: boolean; dir: string }>;
+  getProfileInfo: (name: string) => Promise<{
+    success: boolean;
+    info?: {
+      path: string;
+      size: number;
+      files: number;
+      java: string;
+      system: string;
+      nodeVersion: string;
+      electronVersion: string;
+    };
+  }>;
+  removeModFromProfile: (data: {
+    profile: string;
+    fileName: string;
+    subfolder?: string;
+  }) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  // Microsoft
+  loginMicrosoft: () => Promise<
+    { success: true; account: MicrosoftAccount } | { success: false; error: string }
+  >;
+  refreshMicrosoft: (token: string) => Promise<
+    { success: true; account: MicrosoftAccount } | { success: false; error: string }
+  >;
+
+  onLaunchProgress: (callback: (msg: string) => void) => () => void;
+  onAuthProgress: (callback: (msg: string) => void) => () => void;
+
+  // Отдельное окно логов
+  isLogsWindow: boolean;
+  openLogsWindow: () => Promise<{ success: boolean }>;
+  getLogs: () => Promise<{ success: boolean; logs: LogEntry[] }>;
+  appendLog: (entry: { time: number; level: "info" | "warn" | "error" | "success"; text: string }) => Promise<{ success: boolean }>;
+  clearLogs: () => Promise<{ success: boolean }>;
+  onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
+}
+
+export interface LogEntry {
+  time: number;
+  level: "info" | "warn" | "error" | "success";
+  text: string;
+}
+
+declare global {
+  interface Window {
+    electronAPI?: ElectronAPI;
+  }
+}
