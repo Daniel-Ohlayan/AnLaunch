@@ -25,6 +25,13 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          # Прикрепить только .exe и latest.yml, исключить исходный код
           files: |
             release/AnLaunch-Setup-*.exe
             release/latest.yml
+          # Не прикреплять всё подряд
+          fail_on_unmatched_files: true
+          # Сделать релиз не draft, чтобы автообновление работало
+          draft: false
+          prerelease: false
+          generate_release_notes: true

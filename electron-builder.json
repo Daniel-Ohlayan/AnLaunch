@@ -27,6 +27,7 @@
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false,
     "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
     "shortcutName": "AnLaunch"
   },
   "mac": {
