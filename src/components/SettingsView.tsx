@@ -32,6 +32,50 @@ export default function SettingsView({
   const [closeOnLaunch, setCloseOnLaunch] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
 
+  // Обновления приложения
+  const [appVersion, setAppVersion] = useState("1.0.0");
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "error">("idle");
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    window.electronAPI.getAppVersion().then(setAppVersion);
+
+    const unsub = window.electronAPI.onUpdateStatus((data) => {
+      setUpdateStatus(data.status as any);
+      if (data.percent !== undefined) setUpdateProgress(data.percent);
+      if (data.version) setUpdateVersion(data.version);
+      if (data.error) setUpdateError(data.error);
+    });
+
+    return unsub;
+  }, []);
+
+  async function handleCheckUpdates() {
+    if (!window.electronAPI) {
+      showToast("Обновления доступны только в десктоп-версии", "err");
+      return;
+    }
+    setUpdateStatus("checking");
+    setUpdateError(null);
+    showToast("Проверяю обновления…");
+    const res = await window.electronAPI.checkForUpdates();
+    if (res.success) {
+      if (res.updateAvailable) {
+        showToast(`Доступно обновление v${res.version}. Загружается автоматически.`);
+      } else {
+        showToast("Установлена последняя версия ✓");
+        setUpdateStatus("idle");
+      }
+    } else {
+      setUpdateStatus("error");
+      setUpdateError(res.error || "Не удалось проверить");
+    }
+  }
+
   function showToast(msg: string, type: "ok" | "err" = "ok") {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -413,20 +457,52 @@ export default function SettingsView({
           />
         </Section>
 
-        {/* Java & Обновления */}
-        <Section title="Java и обновления" icon={<DownloadIcon className="h-4 w-4" />}>
-          <p className="px-2 pb-3 text-sm leading-relaxed text-white/55">
-            Для запуска Minecraft нужна установленная <b className="text-white/80">Java 17+</b>. Если
-            игра не запускается — скачайте Java с{" "}
-            <a
-              href="https://adoptium.net/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+        {/* Обновления и Java */}
+        <Section title="Обновления AnLaunch" icon={<DownloadIcon className="h-4 w-4" />}>
+          <div className="mb-3 flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+            <div>
+              <div className="text-sm font-medium text-white/85">Текущая версия</div>
+              <div className="text-xs text-white/40">v{appVersion}</div>
+            </div>
+            <button
+              onClick={handleCheckUpdates}
+              disabled={updateStatus === "checking" || updateStatus === "downloading"}
+              className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
             >
-              adoptium.net
-            </a>
-            .
+              {updateStatus === "checking" ? "Проверка..." :
+               updateStatus === "downloading" ? `Загрузка ${updateProgress}%` :
+               "🔄 Проверить"}
+            </button>
+          </div>
+
+          {updateStatus === "ready" && (
+            <div className="mb-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-3">
+              <div className="text-sm font-semibold text-emerald-300">
+                ✓ Обновление v{updateVersion} готово
+              </div>
+              <div className="mt-1 text-xs text-white/60">
+                Перезапустите AnLaunch для установки.
+              </div>
+            </div>
+          )}
+
+          {updateStatus === "error" && (
+            <div className="mb-3 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-xs text-red-300">
+              ✗ {updateError || "Ошибка проверки обновлений"}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-xs text-white/50">
+            <div className="mb-1 font-semibold text-white/70">ℹ️ Как это работает</div>
+            AnLaunch автоматически проверяет обновления при каждом запуске и каждые 6 часов.
+            Новая версия скачивается в фоне, при выходе из приложения она установится автоматически.
+          </div>
+        </Section>
+
+        {/* Java */}
+        <Section title="Java" icon={<DownloadIcon className="h-4 w-4" />}>
+          <p className="mb-3 px-2 text-sm leading-relaxed text-white/55">
+            Для запуска Minecraft нужна установленная <b className="text-white/80">Java 17+</b>.
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <ActionButton onClick={async () => {
@@ -451,7 +527,7 @@ export default function SettingsView({
                 showToast("Только в десктоп-версии", "err");
               }
             }}>
-              📁 Открыть папку профилей
+              📁 Папка данных
             </ActionButton>
           </div>
         </Section>

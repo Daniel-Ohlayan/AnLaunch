@@ -4,6 +4,17 @@
   "private": true,
   "version": "1.0.0",
   "main": "electron/main.js",
+  "build": {
+    "appId": "com.anlaunch.launcher",
+    "productName": "AnLaunch",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Daniel-Ohlayan",
+        "repo": "AnLaunch"
+      }
+    ]
+  },
   "scripts": {
     "dev": "npx vite",
     "dev:vite": "npx vite",
@@ -15,7 +26,7 @@
   },
   "dependencies": {
     "clsx": "2.1.1",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.6.2",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwind-merge": "3.4.0"

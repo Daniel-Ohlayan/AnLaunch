@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, Notification } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { execSync } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
 let mainWindow = null;
 let isDev = false;
@@ -505,6 +506,11 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // ── АВТООБНОВЛЕНИЯ ───────────────────────────────────────────
+  if (!isDev) {
+    setupAutoUpdater();
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -514,9 +520,112 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-  app.whenReady().then(() => {
-    initFolders();
-    createWindow();
-+   // ====== АВТООБНОВЛЕНИЯ ======
-+   setupAutoUpdater();
+// ── Автообновление через electron-updater ─────────────────────
+function setupAutoUpdater() {
+  // Настройка логирования
+  autoUpdater.logger = {
+    info: (msg) => console.log("[Updater]", msg),
+    warn: (msg) => console.warn("[Updater]", msg),
+    error: (msg) => console.error("[Updater]", msg),
+    debug: () => {},
+  };
+
+  autoUpdater.autoDownload = true; // скачивать обновления автоматически
+  autoUpdater.autoInstallOnAppQuit = true; // устанавливать при выходе
+
+  // Уведомляем renderer при обновлениях
+  autoUpdater.on("checking-for-update", () => {
+    mainWindow?.webContents.send("update-status", { status: "checking" });
   });
+
+  autoUpdater.on("update-available", (info) => {
+    mainWindow?.webContents.send("update-status", {
+      status: "available",
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+    });
+    // Уведомление в системе
+    try {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: "Доступно обновление AnLaunch",
+          body: `Версия ${info.version} загружается…`,
+        }).show();
+      }
+    } catch {}
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    mainWindow?.webContents.send("update-status", {
+      status: "downloading",
+      percent: progress.percent,
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    mainWindow?.webContents.send("update-status", {
+      status: "ready",
+      version: info.version,
+    });
+    // Спрашиваем пользователя
+    dialog
+      .showMessageBox(mainWindow, {
+        type: "info",
+        title: "Обновление готово",
+        message: `AnLaunch v${info.version} загружен`,
+        detail: "Перезапустите приложение для установки обновления.",
+        buttons: ["Перезапустить", "Позже"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
+  });
+
+  autoUpdater.on("error", (err) => {
+    mainWindow?.webContents.send("update-status", {
+      status: "error",
+      error: err.message,
+    });
+    console.error("[Updater] Error:", err);
+  });
+
+  // Проверка обновлений при запуске (через 3 сек, чтобы окно успело открыться)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error("[Updater] Initial check failed:", err);
+    });
+  }, 3000);
+
+  // Периодическая проверка каждые 6 часов
+  setInterval(
+    () => {
+      autoUpdater.checkForUpdates().catch(() => {});
+    },
+    6 * 60 * 60 * 1000,
+  );
+}
+
+// IPC для ручной проверки обновлений из настроек
+ipcMain.handle("check-for-updates", async () => {
+  if (!autoUpdater) {
+    return { success: false, error: "Updater недоступен" };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return {
+      success: true,
+      updateAvailable: !!result,
+      version: result?.updateInfo?.version,
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});

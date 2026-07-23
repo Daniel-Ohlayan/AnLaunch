@@ -49,5 +49,10 @@
     "icon": "public/icon.png",
     "artifactName": "AnLaunch-${version}.${ext}",
     "category": "Game"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "Daniel-Ohlayan",
+    "repo": "AnLaunch"
   }
 }

@@ -113,6 +113,24 @@ export interface ElectronAPI {
   appendLog: (entry: { time: number; level: "info" | "warn" | "error" | "success"; text: string }) => Promise<{ success: boolean }>;
   clearLogs: () => Promise<{ success: boolean }>;
   onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
+
+  // Автообновление
+  checkForUpdates: () => Promise<{
+    success: boolean;
+    updateAvailable?: boolean;
+    version?: string;
+    error?: string;
+  }>;
+  getAppVersion: () => Promise<string>;
+  onUpdateStatus: (
+    callback: (data: {
+      status: "checking" | "available" | "downloading" | "ready" | "error";
+      version?: string;
+      percent?: number;
+      error?: string;
+      releaseNotes?: string | null;
+    }) => void
+  ) => () => void;
 }
 
 export interface LogEntry {
