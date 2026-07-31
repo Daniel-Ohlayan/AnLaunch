@@ -2,7 +2,7 @@
   "name": "anlaunch",
   "productName": "AnLaunch",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "electron/main.js",
   "build": {
     "appId": "com.anlaunch.launcher",
@@ -25,6 +25,7 @@
     "electron:start": "npx electron ."
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "clsx": "2.1.1",
     "electron-updater": "^6.6.2",
     "react": "19.2.6",

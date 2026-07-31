@@ -8,9 +8,11 @@
   "files": [
     "dist/**/*",
     "electron/**/*",
-    "package.json"
+    "package.json",
+    "node_modules/**/*"
   ],
   "extraResources": [],
+  "npmRebuild": true,
   "win": {
     "target": [
       {
