@@ -58,8 +58,8 @@ export async function fetchVersionManifest(forceRefresh = false): Promise<Versio
   }
 }
 
-// Дата выхода 1.7.10 — всё, что старше, скрываем
-const MIN_RELEASE_TIME = new Date("2014-06-01").getTime();
+// Дата выхода 1.8.9 — всё, что старше, скрываем
+const MIN_RELEASE_TIME = new Date("2015-12-01").getTime();
 
 function isModern(v: MinecraftVersion): boolean {
   const t = new Date(v.releaseTime).getTime();

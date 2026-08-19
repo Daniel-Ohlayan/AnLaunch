@@ -24,6 +24,8 @@ export interface ElectronAPI {
     { success: true; filePath: string } | { success: false; error?: string }
   >;
   checkJava: () => Promise<{ exists: boolean; path?: string; version?: string }>;
+  validateJavaPath: (path: string) => Promise<{ exists: boolean; path?: string; version?: string }>;
+  minimizeMainWindow: () => Promise<{ success: boolean }>;
   launchMinecraftReal: (config: {
     account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string };
     version: string;
@@ -31,6 +33,11 @@ export interface ElectronAPI {
     ram: number;
     profile: string;
     mods: { fileName: string; downloadsUrl: string }[];
+    javaPath?: string;
+    mcFullscreen?: boolean;
+    mcWidth?: number;
+    mcHeight?: number;
+    jvmArgs?: string;
     server?: { host: string; port?: number };
   }) => Promise<{ success: boolean; message: string }>;
 

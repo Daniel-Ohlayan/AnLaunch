@@ -12,7 +12,6 @@ const items: { id: Tab; label: string; Icon: typeof PlayIcon }[] = [
 export default function TopNav({
   active,
   onSelect,
-  installedCount,
   activeAccount,
   onOpenAccounts,
   onDiagnostics,
@@ -24,21 +23,20 @@ export default function TopNav({
 }: {
   active: Tab;
   onSelect: (t: Tab) => void;
-  installedCount: number;
   activeAccount: Account | null;
   onOpenAccounts: () => void;
   onDiagnostics: () => void;
   onHomeSettings: () => void;
   onShowLogs: () => void;
   hasRunningLaunch?: boolean;
-  accent: { gradient: string; text: string; bg: string; border: string };
+  accent: { gradient: string; text: string; bg: string; border: string; shadow: string; bgSolid: string };
   activeProfileAvatar?: string | null;
 }) {
   return (
     <header className="no-select relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-white/[0.06] bg-white/[0.015] px-6 backdrop-blur-xl">
       {/* Brand */}
       <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/20">
+        <div className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${accent.gradient} ${accent.shadow} shadow-lg`}>
           <svg viewBox="0 0 24 24" className="h-5 w-5 text-[#06070a]" fill="currentColor">
             <path d="M12 2l9 5v10l-9 5-9-5V7z" opacity="0.9" />
           </svg>
@@ -70,15 +68,6 @@ export default function TopNav({
               )}
               <Icon className="relative h-4 w-4" />
               <span className="relative">{label}</span>
-              {id === "mods" && installedCount > 0 && (
-                <span
-                  className={`relative flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold ${
-                    isActive ? "bg-[#06070a] text-emerald-300" : "bg-emerald-500 text-[#06070a]"
-                  }`}
-                >
-                  {installedCount}
-                </span>
-              )}
             </button>
           );
         })}

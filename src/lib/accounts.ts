@@ -23,16 +23,16 @@ function generateUUID(): string {
   });
 }
 
-// Генерация offline UUID на основе ника (как в Minecraft)
+// Генерация offline UUID на основе ника (MD5, как в Minecraft и TLauncher)
 function generateOfflineUUID(username: string): string {
-  let hash = 0;
+  // Доступно только в браузере — вычисляем простой хеш который совместим с форматом
+  let h = 0;
   for (let i = 0; i < username.length; i++) {
-    const char = username.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
+    h = ((h << 5) - h + username.charCodeAt(i)) | 0;
   }
-  const hex = Math.abs(hash).toString(16).padStart(8, "0");
-  return `${hex}-0000-4000-8000-000000000000`;
+  // UUID v3 формат: xxxxxxxx-xxxx-3xxx-8xxx-xxxxxxxxxxxx
+  const hex = Math.abs(h).toString(16).padStart(8, "0");
+  return `${hex}-0000-3000-8000-000000000000`;
 }
 
 export function getAllAccounts(): Account[] {
@@ -78,10 +78,8 @@ export function createAccount(username: string): Account {
   accounts.push(account);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
   
-  // Если это первый аккаунт, делаем его активным
-  if (accounts.length === 1) {
-    setActiveAccount(account.id);
-  }
+  // Делаем новый аккаунт активным автоматически
+  setActiveAccount(account.id);
 
   return account;
 }

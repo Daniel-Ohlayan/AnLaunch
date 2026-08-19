@@ -40,7 +40,7 @@ export default function CreateProfileModal({
     if (open) {
       setName("");
       setVersion(defaultVersion);
-      setLoader(defaultLoader);
+      setLoader(defaultLoader === "forge" || defaultLoader === "neoforge" ? "fabric" : defaultLoader);
       setDescription("");
       setAvatarUrl(null);
       setAccentColor(homeSettings.accentColor || "emerald");
@@ -55,15 +55,18 @@ export default function CreateProfileModal({
     fetch("https://launchermeta.mojang.com/mc/game/version_manifest.json")
       .then((r) => r.json())
       .then((data) => {
+        // Фильтруем: только release, начиная с 1.7.10 (июнь 2014)
+        const minDate = new Date("2014-06-01").getTime();
         const versions = (data.versions || [])
-          .filter((v: { type: string; id: string }) => v.type === "release")
-          .map((v: { id: string }) => v.id)
-          .slice(0, 100);
+          .filter((v: { type: string; releaseTime: string }) =>
+            v.type === "release" && new Date(v.releaseTime).getTime() >= minDate
+          )
+          .map((v: { id: string }) => v.id);
         setAvailableVersions(versions);
       })
       .catch(() => {
         setAvailableVersions([
-          "26.2", "26.1.2", "26.1", "1.21.8", "1.21.4", "1.20.4", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.16.5", "1.12.2",
+          "26.2", "26.1.2", "26.1", "1.21.8", "1.21.4", "1.20.4", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.13.2", "1.12.2", "1.11.2", "1.10.2", "1.9.4", "1.8.9", "1.7.10",
         ]);
       });
   }, [open]);
@@ -107,8 +110,12 @@ export default function CreateProfileModal({
     if (!trimmed) return setError("Введите имя профиля");
     if (trimmed.length < 2) return setError("Имя слишком короткое");
     if (trimmed.length > 32) return setError("Имя слишком длинное");
-    if (!/^[a-zA-Z0-9_\- ]+$/.test(trimmed))
-      return setError("Только латиница, цифры, _ и -");
+    if (!/^[\p{L}\p{N}._ -]+$/u.test(trimmed))
+      return setError("Разрешены русские и латинские буквы, цифры, пробел, точка, _ и -");
+    if (trimmed === "." || trimmed === ".." || /[. ]$/.test(trimmed))
+      return setError("Имя не может заканчиваться точкой или пробелом");
+    if (loader === "forge" || loader === "neoforge")
+      return setError("Пока что этот загрузчик недоступен. Выберите Vanilla, Fabric или Quilt.");
 
     try {
       await onCreate({
@@ -176,28 +183,29 @@ export default function CreateProfileModal({
           </button>
         </div>
 
-        {/* Steps progress */}
+        {/* Steps progress — кликабельные вкладки */}
         <div className="flex border-b border-white/[0.04] bg-black/20">
           {(["name", "version", "loader", "appearance"] as const).map((s, i) => {
             const idx = ["name", "version", "loader", "appearance"].indexOf(step);
             const done = idx > i;
             const active = idx === i;
             return (
-              <div
+              <button
                 key={s}
-                className={`flex-1 border-b-2 py-2 text-center text-[10px] uppercase tracking-wider transition ${
+                onClick={() => setStep(s)}
+                className={`flex-1 border-b-2 py-2 text-center text-[10px] uppercase tracking-wider transition cursor-pointer ${
                   active
                     ? "border-emerald-400 text-emerald-300"
                     : done
-                    ? "border-emerald-400/30 text-emerald-300/50"
-                    : "border-transparent text-white/30"
+                    ? "border-emerald-400/30 text-emerald-300/50 hover:text-emerald-300"
+                    : "border-transparent text-white/30 hover:text-white/60"
                 }`}
               >
                 {s === "name" && "Имя"}
                 {s === "version" && "Версия"}
                 {s === "loader" && "Загрузчик"}
                 {s === "appearance" && "Стиль"}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -254,7 +262,7 @@ export default function CreateProfileModal({
               </div>
               <div className="max-h-64 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/20 p-2">
                 <div className="grid grid-cols-3 gap-1.5">
-                  {filteredVersions.slice(0, 36).map((v) => (
+                  {filteredVersions.map((v) => (
                     <button
                       key={v}
                       onClick={() => setVersion(v)}
@@ -276,20 +284,29 @@ export default function CreateProfileModal({
             <div className="space-y-2">
               {(
                 [
-                  { id: "vanilla" as ModLoader, label: "Vanilla", icon: "🎮", desc: "Чистая ванильная версия" },
-                  { id: "fabric" as ModLoader, label: "Fabric", icon: "🧩", desc: "Лёгкий и быстрый загрузчик модов" },
-                  { id: "forge" as ModLoader, label: "Forge", icon: "⚙️", desc: "Классический загрузчик" },
-                  { id: "neoforge" as ModLoader, label: "NeoForge", icon: "✨", desc: "Форк Forge для новых версий" },
-                  { id: "quilt" as ModLoader, label: "Quilt", icon: "🔷", desc: "Форк Fabric" },
+                  { id: "vanilla" as ModLoader, label: "Vanilla", icon: "🎮", desc: "Чистая ванильная версия", available: true },
+                  { id: "fabric" as ModLoader, label: "Fabric", icon: "🧩", desc: "Лёгкий и быстрый загрузчик модов", available: true },
+                  { id: "quilt" as ModLoader, label: "Quilt", icon: "🔷", desc: "Форк Fabric", available: true },
+                  { id: "forge" as ModLoader, label: "Forge", icon: "⚙️", desc: "Пока что загрузчик недоступен — будет позже", available: false },
+                  { id: "neoforge" as ModLoader, label: "NeoForge", icon: "✨", desc: "Пока что загрузчик недоступен — будет позже", available: false },
                 ]
               ).map((l) => (
                 <button
                   key={l.id}
-                  onClick={() => setLoader(l.id)}
+                  onClick={() => {
+                    if (!l.available) {
+                      setError("Пока что этот загрузчик недоступен. Выберите Vanilla, Fabric или Quilt.");
+                      return;
+                    }
+                    setError(null);
+                    setLoader(l.id);
+                  }}
                   className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
-                    loader === l.id
-                      ? "border-emerald-400/40 bg-emerald-500/10"
-                      : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
+                    !l.available
+                      ? "cursor-not-allowed border-white/[0.04] bg-white/[0.01] opacity-50"
+                      : loader === l.id
+                        ? "border-emerald-400/40 bg-emerald-500/10"
+                        : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
                   }`}
                 >
                   <div className="text-2xl">{l.icon}</div>

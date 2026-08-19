@@ -12,6 +12,11 @@ export interface LaunchConfig {
   profile: string;
   mods: InstalledMod[];
   modStates: Record<string, boolean>;
+  javaPath?: string;
+  mcFullscreen?: boolean;
+  mcWidth?: number;
+  mcHeight?: number;
+  jvmArgs?: string;
 }
 
 export interface LaunchResult {
@@ -43,7 +48,9 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
   }
 
   try {
-    const java = await checkJava();
+    const java = config.javaPath
+      ? await window.electronAPI.validateJavaPath(config.javaPath)
+      : await checkJava();
     if (!java.exists) {
       return {
         success: false,
@@ -69,6 +76,11 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
         fileName: m.fileName,
         downloadsUrl: m.downloadsUrl,
       })),
+      javaPath: config.javaPath,
+      mcFullscreen: config.mcFullscreen,
+      mcWidth: config.mcWidth,
+      mcHeight: config.mcHeight,
+      jvmArgs: config.jvmArgs,
     });
 
     return result;

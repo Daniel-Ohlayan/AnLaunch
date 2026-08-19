@@ -11,6 +11,21 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+// Windows-safe profile names. Cyrillic, Latin, digits, spaces, dots, `_` and `-` are allowed.
+function sanitizeProfileName(value) {
+  let name = String(value || "").trim();
+  name = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
+  name = name.replace(/[^\p{L}\p{N}._ -]/gu, "_");
+  name = name.replace(/[. ]+$/g, "").trim();
+  if (!name || name === "." || name === "..") return "Default";
+
+  // Windows reserves these device names even with an extension.
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
+    name = `_${name}`;
+  }
+  return name.slice(0, 80);
+}
+
 // Базовая директория лаунчера внутри userData
 function getRootDir(userDataPath) {
   const root = path.join(userDataPath, "AnLaunch");
@@ -33,7 +48,7 @@ function getSharedDir(userDataPath) {
 
 // Создать/получить директорию профиля со всеми подпапками
 function ensureProfile(userDataPath, profileName) {
-  const safeName = (profileName || "default").replace(/[^a-zA-Z0-9_\- ]/g, "_");
+  const safeName = sanitizeProfileName(profileName || "Default");
   const dir = path.join(getProfilesDir(userDataPath), safeName);
   ensureDir(dir);
   for (const sub of PROFILE_SUBDIRS) {
@@ -81,6 +96,7 @@ module.exports = {
   getProfilesDir,
   getSharedDir,
   ensureProfile,
+  sanitizeProfileName,
   listProfiles,
   PROFILE_SUBDIRS,
 };

@@ -10,6 +10,22 @@ export default function SettingsView({
   loader,
   activeProfile,
   setActiveProfile,
+  javaPath,
+  setJavaPath,
+  openLogsOnLaunch,
+  setOpenLogsOnLaunch,
+  clearLogsOnLaunch,
+  setClearLogsOnLaunch,
+  minimizeOnLaunch,
+  setMinimizeOnLaunch,
+  mcFullscreen,
+  setMcFullscreen,
+  mcWidth,
+  setMcWidth,
+  mcHeight,
+  setMcHeight,
+  jvmArgs,
+  setJvmArgs,
 }: {
   ram: number;
   setRam: (n: number) => void;
@@ -17,6 +33,22 @@ export default function SettingsView({
   loader: ModLoader;
   activeProfile: string;
   setActiveProfile: (p: string) => void;
+  javaPath: string;
+  setJavaPath: (path: string) => void;
+  openLogsOnLaunch: boolean;
+  setOpenLogsOnLaunch: (value: boolean) => void;
+  clearLogsOnLaunch: boolean;
+  setClearLogsOnLaunch: (value: boolean) => void;
+  minimizeOnLaunch: boolean;
+  setMinimizeOnLaunch: (value: boolean) => void;
+  mcFullscreen: boolean;
+  setMcFullscreen: (value: boolean) => void;
+  mcWidth: number;
+  setMcWidth: (value: number) => void;
+  mcHeight: number;
+  setMcHeight: (value: number) => void;
+  jvmArgs: string;
+  setJvmArgs: (value: string) => void;
 }) {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [newProfile, setNewProfile] = useState("");
@@ -25,15 +57,11 @@ export default function SettingsView({
   const [editValue, setEditValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
-
-  // Приватность
-  const [telemetry, setTelemetry] = useState(false);
-  const [autoUpdate, setAutoUpdate] = useState(true);
-  const [closeOnLaunch, setCloseOnLaunch] = useState(false);
-  const [showSnapshots, setShowSnapshots] = useState(false);
+  const [javaInput, setJavaInput] = useState(javaPath);
+  const [javaInfo, setJavaInfo] = useState<string>("");
 
   // Обновления приложения
-  const [appVersion, setAppVersion] = useState("1.0.0");
+  const [appVersion, setAppVersion] = useState("1.0.2");
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "error">("idle");
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
@@ -79,6 +107,43 @@ export default function SettingsView({
   function showToast(msg: string, type: "ok" | "err" = "ok") {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  }
+
+  async function chooseJavaPath() {
+    if (!window.electronAPI) return showToast("Доступно только в Electron", "err");
+    const result = await window.electronAPI.openFileDialog({
+      title: "Выберите java.exe",
+      filters: [{ name: "Java executable", extensions: ["exe"] }],
+    });
+    if (result.success && result.paths?.[0]) {
+      setJavaInput(result.paths[0]);
+      const check = await window.electronAPI.validateJavaPath(result.paths[0]);
+      if (check.exists) {
+        setJavaInfo(`Java ${check.version} — путь корректен`);
+      } else {
+        setJavaInfo("Выбранный файл не является рабочей Java");
+      }
+    }
+  }
+
+  async function saveJavaPath() {
+    const value = javaInput.trim();
+    if (!value) {
+      setJavaPath("");
+      setJavaInfo("Используется автоматический выбор Java");
+      showToast("Автоматический выбор Java включён");
+      return;
+    }
+    if (!window.electronAPI) return;
+    const check = await window.electronAPI.validateJavaPath(value);
+    if (!check.exists) {
+      setJavaInfo("Путь не работает");
+      showToast("Не удалось запустить Java по этому пути", "err");
+      return;
+    }
+    setJavaPath(value);
+    setJavaInfo(`Java ${check.version} сохранена`);
+    showToast(`Путь к Java ${check.version} сохранён`);
   }
 
   async function refreshProfiles() {
@@ -418,22 +483,121 @@ export default function SettingsView({
               {activeProfile} · {loader === "vanilla" ? "Vanilla" : loader} · {gameVersion}
             </span>
           </Row>
-          <Row label="Закрывать лаунчер при запуске" hint="Игровое окно откроется отдельно">
-            <Toggle checked={closeOnLaunch} onChange={setCloseOnLaunch} />
+        </Section>
+
+        {/* Java runtime */}
+        <Section title="Java для запуска" icon={<DownloadIcon className="h-4 w-4" />}>
+          <p className="mb-3 px-2 text-sm text-white/50">
+            Оставьте пустым для автоматического выбора или укажите полный путь к java.exe.
+          </p>
+          <div className="flex gap-2 px-2">
+            <input
+              value={javaInput}
+              onChange={(e) => setJavaInput(e.target.value)}
+              placeholder="Автоматически"
+              className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
+            />
+            <button onClick={chooseJavaPath} className="rounded-lg bg-white/[0.06] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.1]">
+              Обзор
+            </button>
+            <button onClick={saveJavaPath} className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-[#06070a] hover:bg-emerald-300">
+              Сохранить
+            </button>
+            <button
+              onClick={() => { setJavaInput(""); setJavaPath(""); setJavaInfo("Используется автоматический выбор Java"); }}
+              className="rounded-lg bg-white/[0.06] px-3 py-2 text-xs text-white/60 hover:bg-white/[0.1]"
+            >
+              Сбросить
+            </button>
+          </div>
+          {javaInfo && <div className="mt-2 px-2 text-xs text-white/45">{javaInfo}</div>}
+        </Section>
+
+        {/* Launch behavior */}
+        <Section title="Поведение при запуске" icon={<GaugeIcon className="h-4 w-4" />}>
+          <Row label="Открывать отдельное окно логов" hint="Показывать этапы запуска Minecraft">
+            <Switch checked={openLogsOnLaunch} onChange={setOpenLogsOnLaunch} />
           </Row>
-          <Row label="Показывать снапшоты" hint="Включить в списке версий preview-сборки">
-            <Toggle checked={showSnapshots} onChange={setShowSnapshots} />
+          <Row label="Очищать старые логи" hint="Начинать каждый запуск с пустого лога">
+            <Switch checked={clearLogsOnLaunch} onChange={setClearLogsOnLaunch} />
+          </Row>
+          <Row label="Сворачивать лаунчер после запуска" hint="Главное окно будет свёрнуто при успешном старте игры">
+            <Switch checked={minimizeOnLaunch} onChange={setMinimizeOnLaunch} />
           </Row>
         </Section>
 
-        {/* Приватность */}
-        <Section title="Приватность" icon={<ShieldIcon className="h-4 w-4" />}>
-          <Row label="Анонимная телеметрия" hint="Помогает улучшать AnLaunch">
-            <Toggle checked={telemetry} onChange={setTelemetry} />
+        {/* Minecraft window */}
+        <Section title="Окно Minecraft" icon={<GaugeIcon className="h-4 w-4" />}>
+          <Row label="Полноэкранный режим" hint="Minecraft откроется на весь экран">
+            <Switch checked={mcFullscreen} onChange={setMcFullscreen} />
           </Row>
-          <Row label="Автообновление" hint="Держать AnLaunch в актуальной версии">
-            <Toggle checked={autoUpdate} onChange={setAutoUpdate} />
+          {!mcFullscreen && (
+            <Row label="Разрешение окна" hint="Ширина × высота игрового окна">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={320}
+                  max={7680}
+                  value={mcWidth}
+                  onChange={(e) => setMcWidth(Math.max(320, Number(e.target.value) || 1280))}
+                  className="w-20 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1.5 text-center text-sm text-white outline-none focus:border-emerald-400/50"
+                />
+                <span className="text-white/40">×</span>
+                <input
+                  type="number"
+                  min={240}
+                  max={4320}
+                  value={mcHeight}
+                  onChange={(e) => setMcHeight(Math.max(240, Number(e.target.value) || 720))}
+                  className="w-20 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1.5 text-center text-sm text-white outline-none focus:border-emerald-400/50"
+                />
+              </div>
+            </Row>
+          )}
+          <Row label="Пресеты разрешения" hint="">
+            <div className="flex gap-1.5">
+              {[
+                { w: 854, h: 480, label: "480p" },
+                { w: 1280, h: 720, label: "720p" },
+                { w: 1920, h: 1080, label: "1080p" },
+                { w: 2560, h: 1440, label: "1440p" },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => {
+                    setMcFullscreen(false);
+                    setMcWidth(p.w);
+                    setMcHeight(p.h);
+                  }}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
+                    !mcFullscreen && mcWidth === p.w && mcHeight === p.h
+                      ? "bg-emerald-400 text-[#06070a]"
+                      : "bg-white/[0.05] text-white/55 hover:bg-white/[0.1]"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </Row>
+          <div className="px-2 pt-2">
+            <div className="mb-1 text-xs text-white/60">
+              Дополнительные JVM-аргументы
+            </div>
+            <input
+              value={jvmArgs}
+              onChange={(e) => setJvmArgs(e.target.value)}
+              placeholder="-XX:+UseG1GC -XX:MaxGCPauseMillis=50"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
+            />
+            <div className="mt-1 text-[11px] text-white/35">
+              Передаются в команду java при запуске. Оставьте пусто, если не уверены.
+            </div>
+          </div>
+        </Section>
+
+        {/* Данные и аккаунты */}
+        <Section title="Данные и аккаунты" icon={<ShieldIcon className="h-4 w-4" />}>
           <ActionRow
             label="Экспортировать аккаунты"
             hint="Скачать файл со всеми аккаунтами"
@@ -639,17 +803,21 @@ function ActionButton({
   );
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (b: boolean) => void }) {
+function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <button
+      type="button"
       onClick={() => onChange(!checked)}
       className={`relative h-6 w-11 rounded-full transition ${checked ? "bg-emerald-400" : "bg-white/15"}`}
+      aria-pressed={checked}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
           checked ? "left-[22px]" : "left-0.5"
         }`}
       />
     </button>
   );
 }
+
+

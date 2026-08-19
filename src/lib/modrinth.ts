@@ -64,6 +64,8 @@ export interface ProjectVersion {
   game_versions: string[];
   loaders: string[];
   files: VersionFile[];
+  date_published?: string;
+  version_type?: "release" | "beta" | "alpha";
   dependencies: { version_id?: string; project_id?: string; dependency_type: string }[];
 }
 
@@ -98,8 +100,23 @@ export async function searchMods(params: {
   return res.json();
 }
 
-export async function getProjectVersions(projectId: string): Promise<ProjectVersion[]> {
-  const res = await fetch(`${BASE}/project/${projectId}/version`, {
+export async function getProjectVersions(
+  projectId: string,
+  options?: { loader?: ModLoader; gameVersion?: string; projectType?: ProjectType }
+): Promise<ProjectVersion[]> {
+  const url = new URL(`${BASE}/project/${projectId}/version`);
+  if (options?.gameVersion) {
+    url.searchParams.set("game_versions", JSON.stringify([options.gameVersion]));
+  }
+  if (
+    options?.projectType === "mod" &&
+    options.loader &&
+    options.loader !== "vanilla"
+  ) {
+    url.searchParams.set("loaders", JSON.stringify([options.loader]));
+  }
+
+  const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Modrinth versions failed: ${res.status}`);
@@ -119,8 +136,18 @@ export function findCompatibleFile(
     const okVer = !gameVersion || v.game_versions.includes(gameVersion);
     return okLoader && okVer;
   });
-  const pool = matches.length ? matches : versions;
-  if (!pool.length) return null;
+  // Никогда не откатываемся на произвольную старую версию. Именно этот fallback
+  // раньше устанавливал старый Fabric API, если релиза для выбранного Minecraft
+  // не было.
+  if (!matches.length) return null;
+
+  const pool = [...matches].sort((a, b) => {
+    const releaseRank = (v: ProjectVersion) =>
+      v.version_type === "release" ? 3 : v.version_type === "beta" ? 2 : 1;
+    const rankDiff = releaseRank(b) - releaseRank(a);
+    if (rankDiff) return rankDiff;
+    return Date.parse(b.date_published || "0") - Date.parse(a.date_published || "0");
+  });
   const primary = pool[0].files.find((f) => f.primary) ?? pool[0].files[0];
   return primary ?? null;
 }

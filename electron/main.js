@@ -3,7 +3,14 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { execSync } = require("child_process");
-const { autoUpdater } = require("electron-updater");
+
+let autoUpdater = null;
+try {
+  const { autoUpdater: upd } = require("electron-updater");
+  autoUpdater = upd;
+} catch {
+  console.warn("electron-updater not available — auto-update disabled");
+}
 
 let mainWindow = null;
 let isDev = false;
@@ -135,6 +142,24 @@ ipcMain.handle("check-java", () => {
   } catch {
     return { exists: false };
   }
+});
+
+ipcMain.handle("validate-java-path", (_event, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) return { exists: false };
+  try {
+    const { spawnSync } = require("child_process");
+    const result = spawnSync(filePath, ["-version"], { encoding: "utf8", windowsHide: true });
+    const output = (result.stdout || "") + (result.stderr || "");
+    const match = output.match(/version\s+"?(\d+(?:[._]\d+)*)/i);
+    return { exists: result.status === 0 || !!match, path: filePath, version: match?.[1] || "unknown" };
+  } catch {
+    return { exists: false };
+  }
+});
+
+ipcMain.handle("minimize-main-window", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+  return { success: true };
 });
 
 ipcMain.handle("save-file", async (_event, { defaultName, buffer }) => {
@@ -328,10 +353,10 @@ ipcMain.handle("open-profiles-root", () => {
 // Переименование профиля
 ipcMain.handle("rename-profile", async (_event, { oldName, newName }) => {
   const fs = require("fs");
-  const { getProfilesDir } = require("./profiles");
+  const { getProfilesDir, sanitizeProfileName } = require("./profiles");
   try {
-    const safeOld = (oldName || "").replace(/[^a-zA-Z0-9_\- ]/g, "_");
-    const safeNew = (newName || "").replace(/[^a-zA-Z0-9_\- ]/g, "_");
+    const safeOld = sanitizeProfileName(oldName);
+    const safeNew = sanitizeProfileName(newName);
     if (!safeOld || !safeNew) {
       return { success: false, error: "Некорректное имя" };
     }
@@ -357,9 +382,9 @@ ipcMain.handle("rename-profile", async (_event, { oldName, newName }) => {
 // Удаление профиля
 ipcMain.handle("delete-profile", async (_event, name) => {
   const fs = require("fs");
-  const { getProfilesDir } = require("./profiles");
+  const { getProfilesDir, sanitizeProfileName } = require("./profiles");
   try {
-    const safe = (name || "").replace(/[^a-zA-Z0-9_\- ]/g, "_");
+    const safe = sanitizeProfileName(name);
     const profilesDir = getProfilesDir(app.getPath("userData"));
     const target = path.join(profilesDir, safe);
     if (!fs.existsSync(target)) {
@@ -465,13 +490,15 @@ ipcMain.handle("launch-minecraft-real", async (_event, config) => {
   const { launchMinecraft } = require("./launcher");
   const { getSharedDir, ensureProfile } = require("./profiles");
 
-  let javaPath = "java";
+  let javaPath = config.javaPath || "java";
   try {
-    execSync("java -version 2>&1", { encoding: "utf8" });
+    execSync(`"${javaPath}" -version 2>&1`, { encoding: "utf8" });
   } catch {
     return {
       success: false,
-      message: "Java не найдена. Установите Java 17+ с https://adoptium.net/ и перезапустите AnLaunch.",
+      message: config.javaPath
+        ? `Java не запускается по указанному пути: ${config.javaPath}`
+        : "Java не найдена. Установите Java или укажите путь в настройках AnLaunch.",
     };
   }
 
@@ -522,6 +549,8 @@ app.on("window-all-closed", () => {
 
 // ── Автообновление через electron-updater ─────────────────────
 function setupAutoUpdater() {
+  if (!autoUpdater) return; // Не установлен — выходим
+
   // Настройка логирования
   autoUpdater.logger = {
     info: (msg) => console.log("[Updater]", msg),

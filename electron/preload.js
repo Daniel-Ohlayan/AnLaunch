@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getUserDataPath: () => ipcRenderer.invoke("get-user-data-path"),
   saveFile: (data) => ipcRenderer.invoke("save-file", data),
   checkJava: () => ipcRenderer.invoke("check-java"),
+  validateJavaPath: (filePath) => ipcRenderer.invoke("validate-java-path", filePath),
+  minimizeMainWindow: () => ipcRenderer.invoke("minimize-main-window"),
   launchMinecraftReal: (config) => ipcRenderer.invoke("launch-minecraft-real", config),
 
   // Профили

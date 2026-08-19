@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType } from "../lib/modrinth";
 import { PROJECT_TYPE_LABELS, searchMods, formatDownloads, formatSize } from "../lib/modrinth";
 import { SearchIcon, DownloadIcon, CheckIcon, CloseIcon, CubeIcon } from "./icons";
+import { getAccent } from "../lib/accent";
 
 const SORTS: { id: SortIndex; label: string }[] = [
   { id: "downloads", label: "По загрузкам" },
@@ -37,6 +38,7 @@ export default function ModsView({
   onInstall,
   onExport,
   onRemove,
+  homeSettings,
 }: {
   gameVersion: string;
   loader: ModLoader;
@@ -45,6 +47,7 @@ export default function ModsView({
   onInstall: (hit: ModHit, projectType: ProjectType) => Promise<void>;
   onExport: (mod: InstalledMod) => Promise<void>;
   onRemove: (id: string) => void;
+  homeSettings?: { accentColor?: string };
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState<SortIndex>("downloads");
@@ -53,21 +56,32 @@ export default function ModsView({
     loader === "vanilla" ? "all" : loader
   );
   const [results, setResults] = useState<ModHit[]>([]);
+  const [totalHits, setTotalHits] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"browse" | "installed">("browse");
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<ModHit | null>(null);
+  const LIMIT = 20;
 
-  const installedIds = useMemo(() => new Set(installedMods.map((m) => m.id)), [installedMods]);
+  const accent = getAccent(homeSettings?.accentColor);
+
+  // Моды фильтруются по активному профилю — у каждого профиля свои моды
+  const profileMods = useMemo(
+    () => installedMods.filter((m) => m.profile === activeProfile || !m.profile),
+    [installedMods, activeProfile]
+  );
+  const installedIds = useMemo(() => new Set(profileMods.map((m) => m.id)), [profileMods]);
   const installedByType = useMemo(
-    () => installedMods.filter((m) => m.projectType === projectType),
-    [installedMods, projectType]
+    () => profileMods.filter((m) => m.projectType === projectType),
+    [profileMods, projectType]
   );
 
-  async function runSearch(q?: string) {
+  async function runSearch(q?: string, p?: number) {
     setLoading(true);
     setError(null);
+    const offset = (p ?? page) * LIMIT;
     try {
       const data = await searchMods({
         query: q ?? query,
@@ -75,8 +89,11 @@ export default function ModsView({
         version: gameVersion as any,
         index,
         projectType,
+        limit: LIMIT,
+        offset,
       });
       setResults(data.hits);
+      setTotalHits(data.total_hits);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось получить данные");
       setResults([]);
@@ -85,8 +102,22 @@ export default function ModsView({
     }
   }
 
+  const totalPages = Math.ceil(totalHits / LIMIT);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  function goPage(p: number) {
+    setPage(p);
+    runSearch(undefined, p);
+    // Прокручиваем список вверх при переключении страницы
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    });
+  }
+
   useEffect(() => {
-    const t = setTimeout(() => runSearch(), 300);
+    setPage(0);
+    const t = setTimeout(() => runSearch(undefined, 0), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, index, loaderFilter, gameVersion, projectType]);
@@ -107,8 +138,6 @@ export default function ModsView({
     }
   }
 
-  const totalSize = installedByType.reduce((a, m) => a + m.size, 0);
-
   return (
     <div className="flex h-full flex-col p-6 animate-fade-up">
       <div className="mb-1 flex items-baseline justify-between">
@@ -123,28 +152,20 @@ export default function ModsView({
 
       {/* Project type tabs */}
       <div className="mb-4 flex gap-1.5">
-        {PROJECT_TYPES.map((pt) => {
-          const count = installedMods.filter((m) => m.projectType === pt).length;
-          return (
-            <button
-              key={pt}
-              onClick={() => setProjectType(pt)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                projectType === pt
-                  ? "bg-emerald-400 text-[#06070a]"
-                  : "bg-white/[0.04] text-white/50 hover:bg-white/[0.08]"
-              }`}
-            >
-              <span>{PROJECT_TYPE_ICONS[pt]}</span>
-              {PROJECT_TYPE_LABELS[pt]}
-              {count > 0 && (
-                <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px]">
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {PROJECT_TYPES.map((pt) => (
+        <button
+          key={pt}
+          onClick={() => setProjectType(pt)}
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            projectType === pt
+              ? `${accent.bgSolid} text-[#06070a]`
+              : "bg-white/[0.04] text-white/50 hover:bg-white/[0.08]"
+          }`}
+        >
+          <span>{PROJECT_TYPE_ICONS[pt]}</span>
+          {PROJECT_TYPE_LABELS[pt]}
+        </button>
+      ))}
       </div>
 
       {/* Search & sort */}
@@ -181,7 +202,7 @@ export default function ModsView({
                 onClick={() => setLoaderFilter(l.id)}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   loaderFilter === l.id
-                    ? "bg-emerald-400 text-[#06070a]"
+                    ? `${accent.bgSolid} text-[#06070a]`
                     : "bg-white/[0.04] text-white/45 hover:bg-white/[0.08]"
                 }`}
               >
@@ -208,12 +229,12 @@ export default function ModsView({
               tab === "installed" ? "bg-white/[0.08] text-white" : "text-white/45"
             }`}
           >
-            Установлено ({installedByType.length})
+            Установлено
           </button>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
         {tab === "browse" ? (
           loading && results.length === 0 ? (
             <CenteredSpinner label={`Поиск ${PROJECT_TYPE_LABELS[projectType].toLowerCase()}…`} />
@@ -222,29 +243,48 @@ export default function ModsView({
           ) : results.length === 0 ? (
             <CenteredMessage text="Ничего не найдено. Измените запрос." />
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {results.map((hit) => (
-                <ModCard
-                  key={hit.project_id}
-                  hit={hit}
-                  installed={installedIds.has(hit.project_id)}
-                  installing={installing.has(hit.project_id)}
-                  onInstall={() => handleInstall(hit)}
-                  onOpen={() => setDetail(hit)}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {results.map((hit) => (
+                  <ModCard
+                    key={hit.project_id}
+                    hit={hit}
+                    installed={installedIds.has(hit.project_id)}
+                    installing={installing.has(hit.project_id)}
+                    onInstall={() => handleInstall(hit)}
+                    onOpen={() => setDetail(hit)}
+                    accentColor={homeSettings?.accentColor}
+                  />
+                ))}
+              </div>
+              {/* Пагинация */}
+              {totalPages > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => goPage(Math.max(0, page - 1))}
+                    disabled={page === 0}
+                    className={`rounded-lg ${accent.bgSolid} px-3 py-1.5 text-xs font-semibold text-[#06070a] transition disabled:bg-white/[0.06] disabled:text-white/30`}
+                  >
+                    ← Назад
+                  </button>
+                  <span className="text-xs text-white/50">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => goPage(Math.min(totalPages - 1, page + 1))}
+                    disabled={page >= totalPages - 1}
+                    className={`rounded-lg ${accent.bgSolid} px-3 py-1.5 text-xs font-semibold text-[#06070a] transition disabled:bg-white/[0.06] disabled:text-white/30`}
+                  >
+                    Далее →
+                  </button>
+                </div>
+              )}
+            </>
           )
         ) : installedByType.length === 0 ? (
           <CenteredMessage text={`Пока нет установленных ${PROJECT_TYPE_LABELS[projectType].toLowerCase()}.`} />
         ) : (
           <div className="space-y-2">
-            <div className="mb-3 flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-sm">
-              <span className="text-white/55">
-                {installedByType.length} {PROJECT_TYPE_LABELS[projectType].toLowerCase().slice(0, -1)}{installedByType.length !== 1 ? "ов" : ""} · профиль {activeProfile}
-              </span>
-              <span className="text-white/55">{formatSize(totalSize)}</span>
-            </div>
             {installedByType.map((m) => (
               <InstalledRow
                 key={m.id}
@@ -265,6 +305,7 @@ export default function ModsView({
           installing={installing.has(detail.project_id)}
           installed={installedIds.has(detail.project_id)}
           projectType={projectType}
+          accentColor={homeSettings?.accentColor}
         />
       )}
     </div>
@@ -277,13 +318,16 @@ function ModCard({
   installing,
   onInstall,
   onOpen,
+  accentColor,
 }: {
   hit: ModHit;
   installed: boolean;
   installing: boolean;
   onInstall: () => void;
   onOpen: () => void;
+  accentColor?: string;
 }) {
+  const accent = getAccent(accentColor);
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02] transition hover:border-white/12 hover:bg-white/[0.04]">
       <button onClick={onOpen} className="flex gap-3 p-3.5 text-left">
@@ -316,7 +360,7 @@ function ModCard({
           <button
             onClick={onInstall}
             disabled={installing}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-[#06070a] transition hover:bg-emerald-300 disabled:opacity-60"
+            className={`flex items-center gap-1.5 rounded-lg ${accent.bgSolid} px-3 py-1.5 text-xs font-semibold text-[#06070a] transition disabled:opacity-60`}
           >
             {installing ? (
               "Установка…"
@@ -374,6 +418,7 @@ function DetailModal({
   installing,
   installed,
   projectType,
+  accentColor,
 }: {
   hit: ModHit;
   onClose: () => void;
@@ -381,7 +426,9 @@ function DetailModal({
   installing: boolean;
   installed: boolean;
   projectType: ProjectType;
+  accentColor?: string;
 }) {
+  const accent = getAccent(accentColor);
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md" onClick={onClose}>
       <div
@@ -429,7 +476,7 @@ function DetailModal({
             <button
               onClick={onInstall}
               disabled={installing}
-              className="flex items-center gap-2 rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300 disabled:opacity-60"
+              className={`flex items-center gap-2 rounded-lg ${accent.bgSolid} px-4 py-2 text-sm font-semibold text-[#06070a] transition disabled:opacity-60`}
             >
               {installing ? "Установка…" : "Установить"}
             </button>
@@ -464,7 +511,7 @@ function ModIcon({ url, size = "md" }: { url: string | null; size?: "md" | "lg" 
 function CenteredSpinner({ label }: { label: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-white/50">
-      <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/10 border-t-emerald-400" />
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/10 border-t-white/60" />
       <span className="text-sm">{label}</span>
     </div>
   );
