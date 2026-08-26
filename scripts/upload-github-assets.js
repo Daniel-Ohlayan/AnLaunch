@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const version = require("../package.json").version;
 const tag = `v${version}`;
@@ -7,6 +8,12 @@ const owner = "Daniel-Ohlayan";
 const repo = "AnLaunch";
 const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 const dir = path.join(__dirname, "..", "release");
+const curlBin = process.platform === "win32" ? "curl.exe" : "curl";
+
+function notice(msg) {
+  console.log(msg);
+  console.log(`::notice::${String(msg).replace(/\r?\n/g, " ").slice(0, 600)}`);
+}
 
 function filesToUpload() {
   if (!fs.existsSync(dir)) return [];
@@ -14,6 +21,16 @@ function filesToUpload() {
     .readdirSync(dir)
     .filter((f) => /^AnLaunch-Setup-.*\.exe$/i.test(f) || f === "latest.yml")
     .map((f) => path.join(dir, f));
+}
+
+function curl(args, extra = {}) {
+  return execFileSync(curlBin, args, {
+    encoding: "utf8",
+    timeout: 180000,
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
+    ...extra,
+  }).trim();
 }
 
 async function api(url, opts = {}) {
@@ -56,13 +73,6 @@ async function uploadToGithub(files) {
   if (!res.ok || !json?.id) {
     throw new Error(`GitHub release ${tag}: ${res.status} ${JSON.stringify(json)}`);
   }
-  if (json.draft) {
-    await api(`https://api.github.com/repos/${owner}/${repo}/releases/${json.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ draft: false, tag_name: tag, make_latest: "true" }),
-    });
-  }
   const existing = Array.isArray(json.assets) ? json.assets : [];
   for (const filePath of files) {
     const name = path.basename(filePath);
@@ -85,57 +95,51 @@ async function uploadToGithub(files) {
       }
     );
     if (!up.ok) throw new Error(`Upload ${name} failed: ${up.status} ${await up.text()}`);
-    console.log("uploaded to GitHub", name);
+    notice(`uploaded to GitHub ${name}`);
   }
 }
 
-async function stashFile(filePath) {
+function stashFile(filePath) {
   const name = path.basename(filePath);
-  const buf = fs.readFileSync(filePath);
-  const blob = new Blob([buf]);
-
   const attempts = [
-    async () => {
-      const form = new FormData();
-      form.append("file", blob, name);
-      const r = await fetch("https://0x0.st", {
-        method: "POST",
-        headers: { "User-Agent": "anlaunch-ci/1.0" },
-        body: form,
-      });
-      const t = (await r.text()).trim();
-      if (!r.ok || !/^https?:\/\//.test(t)) throw new Error(`0x0.st ${r.status} ${t}`);
-      return t.split(/\s+/)[0];
+    () => {
+      const out = curl(["-sS", "-A", "anlaunch-ci", "-F", `file=@${filePath}`, "https://0x0.st"]);
+      const url = out.split(/\s+/).find((x) => /^https?:\/\//.test(x));
+      if (!url) throw new Error(out.slice(0, 180));
+      return url;
     },
-    async () => {
-      const form = new FormData();
-      form.append("reqtype", "fileupload");
-      form.append("fileToUpload", blob, name);
-      const r = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
-      const t = (await r.text()).trim();
-      if (!r.ok || !/^https?:\/\//.test(t)) throw new Error(`catbox ${r.status} ${t}`);
-      return t;
+    () => {
+      const out = curl(["-sS", "-T", filePath, `https://pixeldrain.com/api/file/${encodeURIComponent(name)}`]);
+      const j = JSON.parse(out);
+      const id = j.id || j.hash;
+      if (!id) throw new Error(out.slice(0, 180));
+      return `https://pixeldrain.com/api/file/${id}`;
     },
-    async () => {
-      const form = new FormData();
-      form.append("file", blob, name);
-      const r = await fetch("https://file.io/?expires=1d", { method: "POST", body: form });
-      const j = await r.json();
-      if (!j.link) throw new Error(`file.io ${JSON.stringify(j)}`);
-      return j.link;
+    () => {
+      const out = curl([
+        "-sS",
+        "-F",
+        "reqtype=fileupload",
+        "-F",
+        "time=72h",
+        "-F",
+        `fileToUpload=@${filePath}`,
+        "https://litterbox.catbox.moe/resources/internals/api.php",
+      ]);
+      if (!/^https?:\/\//.test(out)) throw new Error(out.slice(0, 180));
+      return out.split(/\s+/)[0];
     },
   ];
 
   let last = null;
   for (const fn of attempts) {
     try {
-      const url = await fn();
-      console.log(`stashed ${name} -> ${url}`);
-      console.log(`::notice::SETUP_FILE ${name} ${url}`);
+      const url = fn();
+      notice(`SETUP_FILE ${name} ${url}`);
       return url;
     } catch (e) {
       last = e;
-      console.warn("stash attempt failed:", e.message || e);
+      notice(`stash fail ${name}: ${e.message || e}`);
     }
   }
   throw last;
@@ -143,6 +147,7 @@ async function stashFile(filePath) {
 
 async function main() {
   const files = filesToUpload();
+  notice(`release files: ${files.map((f) => path.basename(f)).join(", ") || "(none)"}`);
   if (!files.length) {
     console.error("::error::No AnLaunch-Setup-*.exe or latest.yml in release/");
     process.exit(1);
@@ -152,12 +157,10 @@ async function main() {
     await uploadToGithub(files);
     return;
   } catch (e) {
-    console.warn("GitHub upload failed, will stash files:", e.message || e);
+    notice(`GitHub upload failed: ${e.message || e}`);
   }
 
-  for (const filePath of files) {
-    await stashFile(filePath);
-  }
+  for (const filePath of files) stashFile(filePath);
 }
 
 main().catch((err) => {
