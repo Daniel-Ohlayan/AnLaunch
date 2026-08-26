@@ -55,6 +55,21 @@ export default function LogsApp() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        clearLogs();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveLog();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [logs, filter, search]);
+
   // Автоскролл
   useEffect(() => {
     if (autoScroll) {

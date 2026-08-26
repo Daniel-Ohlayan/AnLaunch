@@ -75,18 +75,20 @@ export default function TopNav({
 
       {/* Account + Help */}
       <div className="flex items-center gap-2">
-        {hasRunningLaunch && (
-          <button
-            onClick={onShowLogs}
-            className="flex h-9 w-9 animate-pulse items-center justify-center rounded-full border border-yellow-400/40 bg-yellow-500/15 text-yellow-300 transition hover:bg-yellow-500/25"
-            title="Показать логи запуска"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
-          </button>
-        )}
+        <button
+          onClick={onShowLogs}
+          className={`flex h-9 w-9 items-center justify-center rounded-full border transition ${
+            hasRunningLaunch
+              ? "animate-pulse border-yellow-400/40 bg-yellow-500/15 text-yellow-300 hover:bg-yellow-500/25"
+              : "border-white/[0.06] bg-black/30 text-white/50 hover:border-emerald-400/30 hover:text-white"
+          }`}
+          title="Показать логи запуска"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </button>
 
         <button
           onClick={onHomeSettings}

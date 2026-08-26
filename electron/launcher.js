@@ -591,7 +591,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   // UUID и токен — точно как в оффлайн-режиме Minecraft
   const crypto = require("crypto");
   let effectiveUuid = account.uuid ? account.uuid.replace(/-/g, "") : "";
-  const isOffline = account.type !== "microsoft";
+  const isOffline = account.type !== "microsoft" && account.type !== "premium";
   if (isOffline) {
     // Правильный оффлайн UUID: md5("OfflinePlayer:Ник") в формате UUID v3
     const md5 = crypto.createHash("md5").update(`OfflinePlayer:${account.username}`, "utf8").digest();
@@ -636,9 +636,10 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     gameArgs = legacy.split(" ").filter(Boolean).map((a) => substitute(a, vars));
   }
 
+  const minRam = Math.max(1, Math.min(Number(config.ramMin) || Math.min(ram, 2), ram));
   const memoryArgs = [
     `-Xmx${ram}G`,
-    `-Xms${Math.min(ram, 2)}G`,
+    `-Xms${minRam}G`,
     "-XX:+UseG1GC",
     "-Dorg.lwjgl.librarypath=" + nativesDir,
   ];
@@ -669,6 +670,27 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   } else if (config.mcWidth && config.mcHeight) {
     gameArgs.push("--width", String(config.mcWidth), "--height", String(config.mcHeight));
     log(`Окно Minecraft: ${config.mcWidth}×${config.mcHeight}`);
+  }
+
+  if (config.mcLanguage) {
+    gameArgs.push("--lang", String(config.mcLanguage));
+    log(`Язык Minecraft: ${config.mcLanguage}`);
+  }
+
+  if (config.serverHost) {
+    const host = String(config.serverHost).trim();
+    const port = Number(config.serverPort) > 0 ? Number(config.serverPort) : 25565;
+    if (host) {
+      const id = String(version || "");
+      const minor = Number(id.split(".")[1] || 0);
+      const isLegacyServerArgs = id.startsWith("1.") && minor < 20;
+      if (isLegacyServerArgs) {
+        gameArgs.push("--server", host, "--port", String(port));
+      } else {
+        gameArgs.push("--quickPlayMultiplayer", `${host}:${port}`);
+      }
+      log(`Автоподключение к серверу ${host}:${port}`);
+    }
   }
 
   const allArgs = [...memoryArgs, ...jvmArgs, mainClass, ...gameArgs];

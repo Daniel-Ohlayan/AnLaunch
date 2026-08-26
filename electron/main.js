@@ -162,6 +162,49 @@ ipcMain.handle("minimize-main-window", () => {
   return { success: true };
 });
 
+ipcMain.handle("quit-app", () => {
+  app.quit();
+  return { success: true };
+});
+
+ipcMain.handle("set-always-on-top", (_event, value) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(!!value);
+  }
+  return { success: true, value: !!value };
+});
+
+ipcMain.handle("get-system-memory", () => {
+  const total = os.totalmem();
+  const free = os.freemem();
+  return {
+    totalBytes: total,
+    freeBytes: free,
+    totalGB: Math.max(1, Math.floor(total / (1024 ** 3))),
+    freeGB: Math.max(0, Math.floor(free / (1024 ** 3))),
+    platform: os.platform(),
+    arch: os.arch(),
+    cpus: os.cpus()?.length || 0,
+  };
+});
+
+ipcMain.handle("set-auto-start", (_event, enabled) => {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, name: "AnLaunch" });
+    return { success: true, enabled: app.getLoginItemSettings().openAtLogin };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-auto-start", () => {
+  try {
+    return { success: true, enabled: !!app.getLoginItemSettings().openAtLogin };
+  } catch {
+    return { success: true, enabled: false };
+  }
+});
+
 ipcMain.handle("save-file", async (_event, { defaultName, buffer }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName,
@@ -341,6 +384,20 @@ ipcMain.handle("open-profile-folder", (_event, name) => {
   const { dir } = ensureProfile(app.getPath("userData"), name || "Default");
   shell.openPath(dir);
   return { success: true, dir };
+});
+
+ipcMain.handle("open-profile-subfolder", (_event, { name, subfolder }) => {
+  const { ensureProfile, PROFILE_SUBDIRS } = require("./profiles");
+  const allowed = new Set([...(PROFILE_SUBDIRS || []), "logs", "crash-reports"]);
+  const sub = String(subfolder || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "");
+  if (!allowed.has(sub)) {
+    return { success: false, error: "Недопустимая папка" };
+  }
+  const { dir } = ensureProfile(app.getPath("userData"), name || "Default");
+  const target = path.join(dir, sub);
+  if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+  shell.openPath(target);
+  return { success: true, dir: target };
 });
 
 ipcMain.handle("open-profiles-root", () => {

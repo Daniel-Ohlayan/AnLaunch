@@ -17,6 +17,10 @@ export interface LaunchConfig {
   mcWidth?: number;
   mcHeight?: number;
   jvmArgs?: string;
+  ramMin?: number;
+  mcLanguage?: string;
+  serverHost?: string;
+  serverPort?: number;
 }
 
 export interface LaunchResult {
@@ -59,7 +63,7 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
       };
     }
 
-    const enabledMods = config.mods.filter((m) => config.modStates[m.id]);
+    const enabledMods = config.mods.filter((m) => config.modStates[m.id] !== false);
 
     const result = await window.electronAPI.launchMinecraftReal({
       account: {
@@ -71,6 +75,7 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
       version: config.version,
       loader: config.loader,
       ram: config.ram,
+      ramMin: config.ramMin,
       profile: config.profile,
       mods: enabledMods.map((m) => ({
         fileName: m.fileName,
@@ -81,6 +86,9 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
       mcWidth: config.mcWidth,
       mcHeight: config.mcHeight,
       jvmArgs: config.jvmArgs,
+      mcLanguage: config.mcLanguage,
+      serverHost: config.serverHost,
+      serverPort: config.serverPort,
     });
 
     return result;

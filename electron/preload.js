@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   checkJava: () => ipcRenderer.invoke("check-java"),
   validateJavaPath: (filePath) => ipcRenderer.invoke("validate-java-path", filePath),
   minimizeMainWindow: () => ipcRenderer.invoke("minimize-main-window"),
+  quitApp: () => ipcRenderer.invoke("quit-app"),
+  setAlwaysOnTop: (value) => ipcRenderer.invoke("set-always-on-top", value),
+  getSystemMemory: () => ipcRenderer.invoke("get-system-memory"),
+  setAutoStart: (enabled) => ipcRenderer.invoke("set-auto-start", enabled),
+  getAutoStart: () => ipcRenderer.invoke("get-auto-start"),
   launchMinecraftReal: (config) => ipcRenderer.invoke("launch-minecraft-real", config),
 
   // Профили
@@ -18,6 +23,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   renameProfile: (oldName, newName) => ipcRenderer.invoke("rename-profile", { oldName, newName }),
   deleteProfile: (name) => ipcRenderer.invoke("delete-profile", name),
   openProfileFolder: (name) => ipcRenderer.invoke("open-profile-folder", name),
+  openProfileSubfolder: (data) => ipcRenderer.invoke("open-profile-subfolder", data),
   openProfilesRoot: () => ipcRenderer.invoke("open-profiles-root"),
 
   // Моды

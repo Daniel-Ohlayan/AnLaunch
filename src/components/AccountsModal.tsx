@@ -134,7 +134,8 @@ export default function AccountsModal({
             <div>
               <div className="font-semibold text-white">Аккаунты</div>
               <div className="text-xs text-white/40">
-                Оффлайн-режим · {accounts.length} {accounts.length === 1 ? "аккаунт" : "аккаунтов"}
+                Microsoft и оффлайн · {accounts.length}{" "}
+                {accounts.length === 1 ? "аккаунт" : accounts.length > 1 && accounts.length < 5 ? "аккаунта" : "аккаунтов"}
               </div>
             </div>
           </div>
@@ -307,7 +308,12 @@ export default function AccountsModal({
                           </button>
                         )}
                         <div className="truncate text-xs text-white/40">
-                          {account.type === "microsoft" ? "🪟 Microsoft" : "🔓 Оффлайн"} ·{" "}
+                          {account.type === "microsoft"
+                            ? "🪟 Microsoft"
+                            : account.type === "premium"
+                              ? "🔑 Лицензия"
+                              : "🔓 Оффлайн"}{" "}
+                          ·{" "}
                           <span className="font-mono text-[10px]">{account.uuid.slice(0, 13)}…</span>
                         </div>
                       </div>

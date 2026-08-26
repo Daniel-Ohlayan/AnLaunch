@@ -26,11 +26,25 @@ export interface ElectronAPI {
   checkJava: () => Promise<{ exists: boolean; path?: string; version?: string }>;
   validateJavaPath: (path: string) => Promise<{ exists: boolean; path?: string; version?: string }>;
   minimizeMainWindow: () => Promise<{ success: boolean }>;
+  quitApp: () => Promise<{ success: boolean }>;
+  setAlwaysOnTop: (value: boolean) => Promise<{ success: boolean; value: boolean }>;
+  getSystemMemory: () => Promise<{
+    totalBytes: number;
+    freeBytes: number;
+    totalGB: number;
+    freeGB: number;
+    platform: string;
+    arch: string;
+    cpus: number;
+  }>;
+  setAutoStart: (enabled: boolean) => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
+  getAutoStart: () => Promise<{ success: boolean; enabled: boolean }>;
   launchMinecraftReal: (config: {
     account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string };
     version: string;
     loader: string;
     ram: number;
+    ramMin?: number;
     profile: string;
     mods: { fileName: string; downloadsUrl: string }[];
     javaPath?: string;
@@ -38,6 +52,9 @@ export interface ElectronAPI {
     mcWidth?: number;
     mcHeight?: number;
     jvmArgs?: string;
+    mcLanguage?: string;
+    serverHost?: string;
+    serverPort?: number;
     server?: { host: string; port?: number };
   }) => Promise<{ success: boolean; message: string }>;
 
@@ -52,6 +69,7 @@ export interface ElectronAPI {
   }>;
   deleteProfile: (name: string) => Promise<{ success: boolean; error?: string }>;
   openProfileFolder: (name: string) => Promise<{ success: boolean; dir: string }>;
+  openProfileSubfolder: (data: { name: string; subfolder: string }) => Promise<{ success: boolean; dir?: string; error?: string }>;
   openProfilesRoot: () => Promise<{ success: boolean; dir: string }>;
 
   // Моды

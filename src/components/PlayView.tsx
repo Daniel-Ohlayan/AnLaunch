@@ -14,6 +14,8 @@ export default function PlayView({
   activeAccount,
   activeProfile,
   onLaunch,
+  javaPath,
+  installedCount,
   profiles,
   onProfileChange,
   onRenameProfile,
@@ -28,6 +30,8 @@ export default function PlayView({
   activeAccount: Account | null;
   activeProfile: string;
   onLaunch: () => void;
+  javaPath?: string;
+  installedCount?: number;
   profiles: ProfileInfo[];
   onProfileChange: (name: string) => void;
   onRenameProfile: (oldName: string, newName: string) => void;
@@ -39,10 +43,12 @@ export default function PlayView({
   const [javaAvailable, setJavaAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (window.electronAPI) {
-      window.electronAPI.checkJava().then((java) => setJavaAvailable(java.exists));
-    }
-  }, []);
+    if (!window.electronAPI) return;
+    const check = javaPath
+      ? window.electronAPI.validateJavaPath(javaPath)
+      : window.electronAPI.checkJava();
+    check.then((java) => setJavaAvailable(java.exists));
+  }, [javaPath]);
 
   const accent = getAccent(homeSettings.accentColor);
   const accentClass = accent.gradient;
@@ -95,6 +101,20 @@ export default function PlayView({
               <p className="mt-2 max-w-md text-xs italic text-white/50">
                 «{homeSettings.profileDescription}»
               </p>
+            )}
+
+            {homeSettings.showStats && (
+              <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
+                <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-white/70 backdrop-blur">
+                  {installedCount ?? 0} модов
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-white/70 backdrop-blur">
+                  {ram} ГБ RAM
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-white/70 backdrop-blur">
+                  {activeProfile}
+                </span>
+              </div>
             )}
 
             {homeSettings.avatarUrl && (

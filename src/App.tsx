@@ -27,10 +27,39 @@ import type { ProfileInfo } from "./types/electron";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("play");
-  const [gameVersion, setGameVersion] = useState<string>("26.2");
-  const [loader, setLoader] = useState<ModLoader>("fabric");
-  const [ram, setRam] = useState(4);
-  const [activeProfile, setActiveProfile] = useState<string>("Default");
+  const [gameVersion, setGameVersion] = useState<string>(() => {
+    try {
+      const profile = localStorage.getItem("anlaunch_active_profile") || "Default";
+      const data = localStorage.getItem(`anlaunch_profile_${profile}`);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed.version) return parsed.version;
+      }
+    } catch {}
+    return "26.2";
+  });
+  const [loader, setLoader] = useState<ModLoader>(() => {
+    try {
+      const profile = localStorage.getItem("anlaunch_active_profile") || "Default";
+      const data = localStorage.getItem(`anlaunch_profile_${profile}`);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed.loader) return parsed.loader as ModLoader;
+      }
+    } catch {}
+    return "fabric";
+  });
+  const [ram, setRam] = useState(() => {
+    const n = parseInt(localStorage.getItem("anlaunch_ram") || "4", 10);
+    return Number.isFinite(n) ? Math.min(64, Math.max(1, n)) : 4;
+  });
+  const [ramMin, setRamMin] = useState(() => {
+    const n = parseInt(localStorage.getItem("anlaunch_ram_min") || "2", 10);
+    return Number.isFinite(n) ? Math.min(32, Math.max(1, n)) : 2;
+  });
+  const [activeProfile, setActiveProfile] = useState<string>(
+    () => localStorage.getItem("anlaunch_active_profile") || "Default"
+  );
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   // Моды загружаются из localStorage — каждый мод привязан к своему профилю
   const [installedMods, setInstalledMods] = useState<InstalledMod[]>(() => {
@@ -65,6 +94,24 @@ export default function App() {
   );
   const [jvmArgs, setJvmArgs] = useState(
     () => localStorage.getItem("anlaunch_jvm_args") || ""
+  );
+  const [closeOnLaunch, setCloseOnLaunch] = useState(
+    () => localStorage.getItem("anlaunch_close_on_launch") === "true"
+  );
+  const [alwaysOnTop, setAlwaysOnTop] = useState(
+    () => localStorage.getItem("anlaunch_always_on_top") === "true"
+  );
+  const [confirmLaunch, setConfirmLaunch] = useState(
+    () => localStorage.getItem("anlaunch_confirm_launch") === "true"
+  );
+  const [mcLanguage, setMcLanguage] = useState(
+    () => localStorage.getItem("anlaunch_mc_language") || ""
+  );
+  const [serverHost, setServerHost] = useState(
+    () => localStorage.getItem("anlaunch_server_host") || ""
+  );
+  const [serverPort, setServerPort] = useState(
+    () => parseInt(localStorage.getItem("anlaunch_server_port") || "25565", 10) || 25565
   );
   const [launching, setLaunching] = useState<{ open: boolean; progress: number; label: string }>({
     open: false,
@@ -104,6 +151,10 @@ export default function App() {
   }, [installedMods]);
 
   useEffect(() => {
+    localStorage.setItem("anlaunch_mod_states", JSON.stringify(modStates));
+  }, [modStates]);
+
+  useEffect(() => {
     localStorage.setItem("anlaunch_java_path", javaPath);
     localStorage.setItem("anlaunch_open_logs", String(openLogsOnLaunch));
     localStorage.setItem("anlaunch_clear_logs", String(clearLogsOnLaunch));
@@ -112,7 +163,20 @@ export default function App() {
     localStorage.setItem("anlaunch_mc_width", String(mcWidth));
     localStorage.setItem("anlaunch_mc_height", String(mcHeight));
     localStorage.setItem("anlaunch_jvm_args", jvmArgs);
-  }, [javaPath, openLogsOnLaunch, clearLogsOnLaunch, minimizeOnLaunch, mcFullscreen, mcWidth, mcHeight, jvmArgs]);
+    localStorage.setItem("anlaunch_ram", String(ram));
+    localStorage.setItem("anlaunch_ram_min", String(Math.min(ramMin, ram)));
+    localStorage.setItem("anlaunch_active_profile", activeProfile);
+    localStorage.setItem("anlaunch_close_on_launch", String(closeOnLaunch));
+    localStorage.setItem("anlaunch_always_on_top", String(alwaysOnTop));
+    localStorage.setItem("anlaunch_confirm_launch", String(confirmLaunch));
+    localStorage.setItem("anlaunch_mc_language", mcLanguage);
+    localStorage.setItem("anlaunch_server_host", serverHost);
+    localStorage.setItem("anlaunch_server_port", String(serverPort));
+  }, [javaPath, openLogsOnLaunch, clearLogsOnLaunch, minimizeOnLaunch, mcFullscreen, mcWidth, mcHeight, jvmArgs, ram, ramMin, activeProfile, closeOnLaunch, alwaysOnTop, confirmLaunch, mcLanguage, serverHost, serverPort]);
+
+  useEffect(() => {
+    window.electronAPI?.setAlwaysOnTop(alwaysOnTop);
+  }, [alwaysOnTop]);
 
   // Применяем accent при загрузке
   useEffect(() => {
@@ -121,6 +185,19 @@ export default function App() {
 
   function updateHomeSettings(next: HomeSettings) {
     setHomeSettings(next);
+  }
+
+  function selectProfile(name: string) {
+    setActiveProfile(name);
+    localStorage.setItem("anlaunch_active_profile", name);
+    try {
+      const data = localStorage.getItem(`anlaunch_profile_${name}`);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed.version) setGameVersion(parsed.version);
+        if (parsed.loader) setLoader(parsed.loader as ModLoader);
+      }
+    } catch {}
   }
 
   // Копирует диагностику системы в буфер обмена
@@ -156,11 +233,13 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       if (e.code === "Escape") {
         setAccountsOpen(false);
+        setCreateProfileOpen(false);
+        if (launching.progress >= 100) setLaunching((l) => ({ ...l, open: false }));
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [launching.progress]);
 
   async function installMod(hit: ModHit, projectType: ProjectType = "mod") {
     // 1. Находим совместимый файл
@@ -275,6 +354,13 @@ export default function App() {
       return;
     }
 
+    if (confirmLaunch) {
+      const ok = window.confirm(
+        `Запустить Minecraft ${gameVersion} (${loader}) в профиле «${activeProfile}»?`
+      );
+      if (!ok) return;
+    }
+
     // Запускаем игру в АКТИВНОМ профиле пользователя — никогда не создаём
     // новый профиль по имени версии и не переключаемся на него.
     const profileName = activeProfile || "Default";
@@ -323,19 +409,29 @@ export default function App() {
           version: gameVersion,
           loader,
           ram,
+          ramMin: Math.min(ramMin, ram),
           profile: profileName,
           mods: installedMods.filter((m) => m.profile === profileName),
           modStates,
           javaPath: javaPath || undefined,
+          mcined,
           mcFullscreen,
           mcWidth: mcFullscreen ? undefined : mcWidth,
           mcHeight: mcFullscreen ? undefined : mcHeight,
           jvmArgs: jvmArgs.trim() ? jvmArgs : undefined,
+          mcLanguage: mcLanguage || undefined,
+          serverHost: serverHost.trim() || undefined,
+          serverPort,
         });
 
         unsub();
 
         if (result.success) {
+          if (closeOnLaunch) {
+            addLog("success", result.message);
+            window.electronAPI?.quitApp();
+            return;
+          }
           if (minimizeOnLaunch) window.electronAPI?.minimizeMainWindow();
           addLog("success", result.message);
           setLaunchStatus("success");
@@ -413,6 +509,7 @@ export default function App() {
           onShowLogs={() => window.electronAPI?.openLogsWindow()}
           hasRunningLaunch={launchStatus === "running"}
           accent={getAccent(homeSettings.accentColor)}
+          activeProfileAvatar={homeSettings.avatarUrl}
         />
 
         <main className="min-h-0 flex-1">
@@ -424,23 +521,24 @@ export default function App() {
               activeAccount={activeAccount}
               activeProfile={activeProfile}
               onLaunch={launch}
+              javaPath={javaPath}
+              installedCount={installedMods.filter((m) => m.profile === activeProfile || !m.profile).length}
               profiles={profiles}
-              onProfileChange={(n) => {
-                setActiveProfile(n);
-                localStorage.setItem("anlaunch_active_profile", n);
-                // Загружаем version и loader из сохранённых данных профиля
-                try {
-                  const data = localStorage.getItem(`anlaunch_profile_${n}`);
-                  if (data) {
-                    const parsed = JSON.parse(data);
-                    if (parsed.version) setGameVersion(parsed.version);
-                    if (parsed.loader) setLoader(parsed.loader as ModLoader);
-                  }
-                } catch {}
-              }}
+              onProfileChange={selectProfile}
               onRenameProfile={async (old: string, n: string) => {
                 const r = await window.electronAPI?.renameProfile(old, n);
-                if (r?.success && activeProfile === old) setActiveProfile(n);
+                if (r?.success) {
+                  const oldKey = `anlaunch_profile_${old}`;
+                  const saved = localStorage.getItem(oldKey);
+                  if (saved) {
+                    localStorage.setItem(`anlaunch_profile_${n}`, saved);
+                    localStorage.removeItem(oldKey);
+                  }
+                  setInstalledMods((prev) =>
+                    prev.map((m) => (m.profile === old ? { ...m, profile: n } : m))
+                  );
+                  if (activeProfile === old) setActiveProfile(n);
+                }
                 await refreshProfiles();
               }}
               onDeleteProfile={async (n) => {
@@ -472,10 +570,12 @@ export default function App() {
             <SettingsView
               ram={ram}
               setRam={setRam}
+              ramMin={ramMin}
+              setRamMin={setRamMin}
               gameVersion={gameVersion}
               loader={loader}
               activeProfile={activeProfile}
-              setActiveProfile={setActiveProfile}
+              setActiveProfile={selectProfile}
               javaPath={javaPath}
               setJavaPath={setJavaPath}
               openLogsOnLaunch={openLogsOnLaunch}
@@ -484,6 +584,12 @@ export default function App() {
               setClearLogsOnLaunch={setClearLogsOnLaunch}
               minimizeOnLaunch={minimizeOnLaunch}
               setMinimizeOnLaunch={setMinimizeOnLaunch}
+              closeOnLaunch={closeOnLaunch}
+              setCloseOnLaunch={setCloseOnLaunch}
+              alwaysOnTop={alwaysOnTop}
+              setAlwaysOnTop={setAlwaysOnTop}
+              confirmLaunch={confirmLaunch}
+              setConfirmLaunch={setConfirmLaunch}
               mcFullscreen={mcFullscreen}
               setMcFullscreen={setMcFullscreen}
               mcWidth={mcWidth}
@@ -492,6 +598,12 @@ export default function App() {
               setMcHeight={setMcHeight}
               jvmArgs={jvmArgs}
               setJvmArgs={setJvmArgs}
+              mcLanguage={mcLanguage}
+              setMcLanguage={setMcLanguage}
+              serverHost={serverHost}
+              setServerHost={setServerHost}
+              serverPort={serverPort}
+              setServerPort={setServerPort}
             />
           )}
         </main>

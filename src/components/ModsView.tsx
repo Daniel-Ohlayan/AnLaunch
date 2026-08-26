@@ -461,7 +461,7 @@ function DetailModal({
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] p-4">
           <a
-            href={`https://modrinth.com/${projectType === "mod" ? "mod" : projectType === "resourcepack" ? "resource-pack" : projectType === "shader" ? "shader" : projectType}/hit.slug`}
+            href={`https://modrinth.com/${projectType === "mod" ? "mod" : projectType === "resourcepack" ? "resourcepack" : projectType === "shader" ? "shader" : projectType}/${hit.slug}`}
             target="_blank"
             rel="noreferrer"
             className="text-xs text-emerald-300 transition hover:text-emerald-200"
