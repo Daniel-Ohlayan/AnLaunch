@@ -556,6 +556,10 @@ export default function App() {
               homeSettings={homeSettings}
               onOpenHomeSettings={() => setHomeSettingsOpen(true)}
               onOpenCreateProfile={() => setCreateProfileOpen(true)}
+              serverHost={serverHost}
+              setServerHost={setServerHost}
+              serverPort={serverPort}
+              setServerPort={setServerPort}
             />
           )}
           {tab === "mods" && (
@@ -604,10 +608,6 @@ export default function App() {
               setJvmArgs={setJvmArgs}
               mcLanguage={mcLanguage}
               setMcLanguage={setMcLanguage}
-              serverHost={serverHost}
-              setServerHost={setServerHost}
-              serverPort={serverPort}
-              setServerPort={setServerPort}
             />
           )}
         </main>

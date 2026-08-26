@@ -23,6 +23,10 @@ export default function PlayView({
   homeSettings,
   onOpenHomeSettings,
   onOpenCreateProfile,
+  serverHost,
+  setServerHost,
+  serverPort,
+  setServerPort,
 }: {
   gameVersion: string;
   loader: ModLoader;
@@ -39,6 +43,10 @@ export default function PlayView({
   homeSettings: HomeSettings;
   onOpenHomeSettings: () => void;
   onOpenCreateProfile: () => void;
+  serverHost: string;
+  setServerHost: (value: string) => void;
+  serverPort: number;
+  setServerPort: (value: number) => void;
 }) {
   const [javaAvailable, setJavaAvailable] = useState<boolean | null>(null);
 
@@ -140,27 +148,57 @@ export default function PlayView({
         accent={accent}
       />
 
-      {/* Bottom info + launch */}
-      <div className="grid grid-cols-[1fr_1fr_1.6fr] gap-3">
-        {/* Version info (read-only from profile) */}
-        <div className="flex flex-col justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-5 py-4">
+      {/* Bottom info + server + launch */}
+      <div className="grid grid-cols-[0.8fr_0.8fr_1.35fr_1.45fr] gap-3">
+        <div className="flex flex-col justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
             Версия
           </span>
-          <span className="text-lg font-bold text-white">{gameVersion}</span>
+          <span className="truncate text-lg font-bold text-white">{gameVersion}</span>
         </div>
 
-        {/* Loader info (read-only from profile) */}
-        <div className="flex flex-col justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-5 py-4">
+        <div className="flex flex-col justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
             Загрузчик
           </span>
-          <span className="text-lg font-bold text-white">
+          <span className="truncate text-lg font-bold text-white">
             {loader === "vanilla" ? "Vanilla" : loader.charAt(0).toUpperCase() + loader.slice(1)}
           </span>
         </div>
 
-        {/* Launch */}
+        <div className="flex min-w-0 flex-col justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+            Сервер
+          </span>
+          <div className="mt-1 flex items-center gap-1.5">
+            <input
+              value={serverHost}
+              onChange={(e) => {
+                const v = e.target.value;
+                const m = v.match(/^(.*):(\d{1,5})$/);
+                if (m) {
+                  setServerHost(m[1].trim());
+                  setServerPort(Math.max(1, Math.min(65535, Number(m[2]) || 25565)));
+                } else {
+                  setServerHost(v);
+                }
+              }}
+              placeholder="не подключать"
+              spellCheck={false}
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:font-medium placeholder:text-white/30"
+            />
+            <span className="text-white/25">:</span>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={serverPort}
+              onChange={(e) => setServerPort(Math.max(1, Math.min(65535, Number(e.target.value) || 25565)))}
+              className="w-14 bg-transparent text-center text-sm font-semibold text-white/80 outline-none"
+            />
+          </div>
+        </div>
+
         <button
           onClick={onLaunch}
           disabled={!activeAccount}
