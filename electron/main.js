@@ -578,36 +578,41 @@ ipcMain.handle("refresh-microsoft", async (_event, refreshToken) => {
 // ── IPC: запуск Minecraft ────────────────────────────────────
 
 ipcMain.handle("launch-minecraft-real", async (_event, config) => {
-  const { execSync } = require("child_process");
   const { launchMinecraft } = require("./launcher");
-  const { getSharedDir, ensureProfile } = require("./profiles");
+  const { getSharedDir, resolveLaunchProfile } = require("./profiles");
 
-  let javaPath = config.javaPath || "java";
-  try {
-    execSync(`"${javaPath}" -version 2>&1`, { encoding: "utf8" });
-  } catch {
-    return {
-      success: false,
-      message: config.javaPath
-        ? `Java не запускается по указанному пути: ${config.javaPath}`
-        : "Java не найдена. Установите Java или укажите путь в настройках AnLaunch.",
-    };
+  if (config.javaPath) {
+    const { getJavaMajorVersion } = require("./javaFinder");
+    if (!getJavaMajorVersion(config.javaPath)) {
+      return {
+        success: false,
+        message: `Java не запускается по указанному пути: ${config.javaPath}`,
+      };
+    }
   }
 
   const userData = app.getPath("userData");
   const sharedDir = getSharedDir(userData);
-  const { dir: gameDir } = ensureProfile(userData, config.profile || "Default");
+  const resolved = resolveLaunchProfile(userData, config.profile);
+  appendLog("info", `Игровой профиль: «${resolved.name}»`);
 
   try {
-    const result = await launchMinecraft(config, javaPath, { sharedDir, gameDir }, (msg) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("launch-progress", msg);
+    const result = await launchMinecraft(
+      { ...config, profile: resolved.name },
+      config.javaPath || undefined,
+      { sharedDir, gameDir: resolved.dir },
+      (msg) => {
+        appendLog("info", msg);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("launch-progress", msg);
+        }
       }
-    });
-    return result;
+    );
+    return { ...result, profile: resolved.name };
   } catch (err) {
     console.error("Launch error:", err);
-    return { success: false, message: `Ошибка запуска: ${err.message}` };
+    appendLog("error", err.message);
+    return { success: false, message: `Ошибка запуска: ${err.message}`, profile: resolved.name };
   }
 });
 

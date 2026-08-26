@@ -637,7 +637,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     version_type: "release",
     natives_directory: nativesDir,
     launcher_name: "AnLaunch",
-    launcher_version: "1.0.3",
+    launcher_version: "1.0.4",
     classpath: cpString,
     game_assets: path.join(assetsDir, "virtual", "legacy"),
     // Правильная сессия для оффлайн-режима: "0" без псевдо-токена
