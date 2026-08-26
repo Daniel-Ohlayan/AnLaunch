@@ -28,6 +28,7 @@ export interface LaunchResult {
   message: string;
   javaPath?: string;
   command?: string;
+  profile?: string;
 }
 
 // Проверка наличия Java в системе (через IPC)

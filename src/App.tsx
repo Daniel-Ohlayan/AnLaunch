@@ -209,7 +209,7 @@ export default function App() {
   async function copyDiagnostics() {
     const info = [
       "=== AnLaunch Diagnostics ===",
-      `Версия AnLaunch: 1.0.3`,
+      `Версия AnLaunch: 1.0.4`,
       `User Agent: ${navigator.userAgent}`,
       `Платформа: ${navigator.platform}`,
       `Язык: ${navigator.language}`,
@@ -348,6 +348,10 @@ export default function App() {
     try {
       const list = await window.electronAPI.listProfiles();
       setProfiles(list);
+      const current = localStorage.getItem("anlaunch_active_profile") || activeProfile;
+      if (list.length > 0 && !list.some((p) => p.name === current)) {
+        selectProfile(list[0].name);
+      }
     } catch {
       /* ignore */
     }
@@ -366,9 +370,8 @@ export default function App() {
       if (!ok) return;
     }
 
-    // Запускаем игру в АКТИВНОМ профиле пользователя — никогда не создаём
-    // новый профиль по имени версии и не переключаемся на него.
-    const profileName = activeProfile || "Default";
+    // Только выбранный профиль. Новый профиль при запуске не создаём.
+    const profileName = activeProfile || profiles[0]?.name || "Default";
 
     setLaunching({ open: true, progress: 0, label: "Подготовка запуска..." });
     setLaunchStatus("running");
@@ -394,10 +397,7 @@ export default function App() {
     // Попытка реального запуска через Electron
     if (window.electronAPI) {
       try {
-        // ensureProfile создаст папку профиля, если её ещё нет, но НЕ переключает
-        await window.electronAPI.createProfile(profileName);
         addLog("info", `Запуск в профиле «${profileName}»`);
-        await refreshProfiles();
 
         setLaunching((l) => ({ ...l, progress: 10, label: "Проверка Java..." }));
         addLog("info", "Проверка Java...");
@@ -429,6 +429,11 @@ export default function App() {
         });
 
         unsub();
+
+        if (result.profile && result.profile !== profileName) {
+          addLog("info", `Используется существующий профиль «${result.profile}»`);
+          selectProfile(result.profile);
+        }
 
         if (result.success) {
           if (closeOnLaunch) {

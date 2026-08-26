@@ -13,7 +13,15 @@
     "package.json",
     "node_modules/**/*"
   ],
-  "extraResources": [],
+  "asarUnpack": [
+    "electron/icon.ico",
+    "electron/icon.png",
+    "build/icon.ico"
+  ],
+  "extraResources": [
+    { "from": "build/icon.ico", "to": "icon.ico" },
+    { "from": "public/icon.png", "to": "icon.png" }
+  ],
   "npmRebuild": false,
   "win": {
     "target": [
@@ -23,7 +31,7 @@
       }
     ],
     "icon": "build/icon.ico",
-    "signAndEditExecutable": false,
+    "signAndEditExecutable": true,
     "artifactName": "AnLaunch-Setup-${version}.${ext}"
   },
   "nsis": {
@@ -33,7 +41,10 @@
     "deleteAppDataOnUninstall": false,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "AnLaunch"
+    "shortcutName": "AnLaunch",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico"
   },
   "mac": {
     "target": [

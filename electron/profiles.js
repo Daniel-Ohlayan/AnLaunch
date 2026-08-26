@@ -57,6 +57,31 @@ function ensureProfile(userDataPath, profileName) {
   return { name: safeName, dir };
 }
 
+function findProfile(userDataPath, profileName) {
+  const safeName = sanitizeProfileName(profileName || "");
+  if (!safeName) return null;
+  return listProfiles(userDataPath).find((p) => p.name === safeName) || null;
+}
+
+// Запуск НИКОГДА не создаёт новый профиль с другим именем.
+// Берём выбранный, иначе уже существующий, и только при полном отсутствии — Default.
+function resolveLaunchProfile(userDataPath, profileName) {
+  const existing = listProfiles(userDataPath);
+  const requested = sanitizeProfileName(profileName || "");
+  const found = existing.find((p) => p.name === requested);
+  if (found) {
+    ensureProfile(userDataPath, found.name);
+    return { name: found.name, dir: found.dir, created: false };
+  }
+  if (existing.length > 0) {
+    const fallback = existing[0];
+    ensureProfile(userDataPath, fallback.name);
+    return { name: fallback.name, dir: fallback.dir, created: false };
+  }
+  const created = ensureProfile(userDataPath, requested || "Default");
+  return { ...created, created: true };
+}
+
 // Список всех профилей с содержимым
 function listProfiles(userDataPath) {
   const profilesDir = getProfilesDir(userDataPath);
@@ -96,6 +121,8 @@ module.exports = {
   getProfilesDir,
   getSharedDir,
   ensureProfile,
+  findProfile,
+  resolveLaunchProfile,
   sanitizeProfileName,
   listProfiles,
   PROFILE_SUBDIRS,

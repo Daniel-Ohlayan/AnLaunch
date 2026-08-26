@@ -9,12 +9,16 @@ if (process.platform === "win32") {
 }
 
 function resolveAppIcon() {
+  const resources = process.resourcesPath || "";
   const candidates = [
     path.join(__dirname, "icon.ico"),
     path.join(__dirname, "icon.png"),
     path.join(__dirname, "../build/icon.ico"),
     path.join(__dirname, "../public/icon.png"),
-    path.join(process.resourcesPath || "", "icon.ico"),
+    path.join(resources, "icon.ico"),
+    path.join(resources, "icon.png"),
+    path.join(resources, "app.asar.unpacked", "electron", "icon.ico"),
+    path.join(resources, "app.asar.unpacked", "build", "icon.ico"),
   ];
   for (const file of candidates) {
     if (file && fs.existsSync(file)) return file;
@@ -151,12 +155,11 @@ function createLogsWindow() {
 
 // Создаём структуру папок при первом запуске (как при установке)
 function initFolders() {
-  const { getRootDir, getProfilesDir, getSharedDir, ensureProfile } = require("./profiles");
+  const { getRootDir, getProfilesDir, getSharedDir } = require("./profiles");
   const userData = app.getPath("userData");
   getRootDir(userData);
   getProfilesDir(userData);
   getSharedDir(userData);
-  ensureProfile(userData, "Default"); // профиль по умолчанию
 }
 
 // ── IPC: базовое ─────────────────────────────────────────────
@@ -165,11 +168,12 @@ ipcMain.handle("is-electron", () => true);
 ipcMain.handle("get-user-data-path", () => app.getPath("userData"));
 
 ipcMain.handle("check-java", () => {
-  const { execSync } = require("child_process");
   try {
-    const output = execSync("java -version 2>&1", { encoding: "utf8" });
-    const match = output.match(/version\s+"?(\d+[\d._]*)"?/i);
-    return { exists: true, path: "java", version: match ? match[1] : "unknown" };
+    const { findAllJavaInstalls } = require("./javaFinder");
+    const installs = findAllJavaInstalls();
+    if (installs.length === 0) return { exists: false };
+    const best = [...installs].sort((a, b) => b.version - a.version)[0];
+    return { exists: true, path: best.path, version: String(best.version) };
   } catch {
     return { exists: false };
   }

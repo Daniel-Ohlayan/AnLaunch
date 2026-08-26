@@ -254,7 +254,7 @@ export default function LogsApp() {
       {/* Status bar */}
       <div className="flex shrink-0 items-center justify-between border-t border-white/[0.06] bg-[#080b14] px-4 py-2 text-[10px] text-white/40">
         <span>
-          AnLaunch v1.0.3 · {window.electronAPI ? "Electron" : "Browser"}
+          AnLaunch v1.0.4 · {window.electronAPI ? "Electron" : "Browser"}
         </span>
         <span>
           <Kbd>Ctrl+L</Kbd> фокус · <Kbd>Ctrl+K</Kbd> очистить · <Kbd>Ctrl+S</Kbd> сохранить

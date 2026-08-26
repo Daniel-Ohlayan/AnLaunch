@@ -56,7 +56,7 @@ export interface ElectronAPI {
     serverHost?: string;
     serverPort?: number;
     server?: { host: string; port?: number };
-  }) => Promise<{ success: boolean; message: string }>;
+  }) => Promise<{ success: boolean; message: string; profile?: string }>;
 
   // Профили
   listProfiles: () => Promise<ProfileInfo[]>;

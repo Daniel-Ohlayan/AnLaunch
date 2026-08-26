@@ -131,11 +131,26 @@ function isLibraryAllowed(lib) {
 function extractNatives(jarPath, nativesDir) {
   ensureDir(nativesDir);
   try {
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip(jarPath);
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory) continue;
+      const name = path.basename(entry.entryName.replace(/\\/g, "/"));
+      if (!/\.(dll|so|dylib|jnilib)$/i.test(name)) continue;
+      fs.writeFileSync(path.join(nativesDir, name), entry.getData());
+    }
+    return;
+  } catch (e) {
+    console.error("adm-zip natives:", e.message);
+  }
+  try {
     if (os.platform() === "win32") {
       const tmp = path.join(nativesDir, `_tmp_${Date.now()}`);
+      const psJar = String(jarPath).replace(/'/g, "''");
+      const psTmp = String(tmp).replace(/'/g, "''");
       execSync(
-        `powershell -NoProfile -command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${jarPath}', '${tmp}')"`,
-        { stdio: "ignore" }
+        `powershell -NoProfile -command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${psJar}', '${psTmp}')"`,
+        { stdio: "ignore", windowsHide: true }
       );
       copyNativeBinaries(tmp, nativesDir);
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -321,6 +336,9 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
         log("ℹ Fabric не поддерживает эту версию Minecraft (нужна 1.14+).");
         log("Для установки модов на эту версию используйте Forge вручную с Java 8, либо выберите версию 1.14 или новее.");
         log("Запускаю ванильную версию");
+      } else if (loader === "fabric" || loader === "quilt") {
+        log(`ℹ ${loader} недоступен для ${version}. Запускаю ванильную версию.`);
+        actualVersion = version;
       } else {
         throw err;
       }
@@ -391,14 +409,18 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
         log(`Найдено Java: ${installs.map((i) => `v${i.version}`).join(", ")}`);
       }
       const best = pickJavaForVersion(installs, requiredJava);
-      if (best) {
+      if (best && best.version >= requiredJava) {
         javaBin = best.path;
+        detectedJava = best.version;
         log(`Использую Java ${best.version}: ${best.path}`);
-        if (best.version < requiredJava) {
-          log(`⚠ Установленная Java ${best.version} старее требуемой ${requiredJava}. Возможны ошибки запуска.`);
-        }
       } else {
-        log(`⚠ Не найдено ни одной установленной Java. Использую системную "java".`);
+        const have = installs.length
+          ? installs.map((i) => `Java ${i.version}`).join(", ")
+          : "не найдена";
+        throw new Error(
+          `Minecraft ${version} требует Java ${requiredJava}+, сейчас: ${have}.\n` +
+            `Скачайте Adoptium Temurin ${requiredJava}: https://adoptium.net/temurin/releases/?version=${requiredJava}`
+        );
       }
     }
   } catch (e) {
@@ -703,6 +725,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   const child = spawn(javaBin, allArgs, {
     cwd: gameDir,
     detached: false,
+    windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -736,6 +759,8 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
       const line = d.toString();
       errBuffer += line;
       console.error("[MC ERR]", line.trim());
+      const t = line.trim();
+      if (t) log(t.length > 400 ? `${t.slice(0, 400)}…` : t);
     });
 
     child.on("error", (err) => {
