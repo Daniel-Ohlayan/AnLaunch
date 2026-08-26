@@ -12,7 +12,7 @@
     "node_modules/**/*"
   ],
   "extraResources": [],
-  "npmRebuild": true,
+  "npmRebuild": false,
   "win": {
     "target": [
       {
@@ -20,7 +20,8 @@
         "arch": ["x64"]
       }
     ],
-    "icon": "public/icon.png",
+    "icon": "build/icon.ico",
+    "signAndEditExecutable": false,
     "artifactName": "AnLaunch-Setup-${version}.${ext}"
   },
   "nsis": {
