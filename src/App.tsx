@@ -7,7 +7,6 @@ import AccountsModal from "./components/AccountsModal";
 import HomeSettingsModal, { DEFAULT_HOME_SETTINGS, type HomeSettings } from "./components/HomeSettingsModal";
 import CreateProfileModal from "./components/CreateProfileModal";
 import { getAccent, applyAccentToDocument } from "./lib/accent";
-void applyAccentToDocument;
 import {
   type InstalledMod,
   type ModLoader,
@@ -69,7 +68,13 @@ export default function App() {
       return [];
     }
   });
-  const [modStates, setModStates] = useState<Record<string, boolean>>({});
+  const [modStates, setModStates] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("anlaunch_mod_states") || "{}");
+    } catch {
+      return {};
+    }
+  });
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [activeAccount, setActiveAccount] = useState<Account | null>(null);
   const [javaPath, setJavaPath] = useState(() => localStorage.getItem("anlaunch_java_path") || "");
@@ -204,7 +209,7 @@ export default function App() {
   async function copyDiagnostics() {
     const info = [
       "=== AnLaunch Diagnostics ===",
-      `Версия AnLaunch: 1.0.2`,
+      `Версия AnLaunch: 1.0.3`,
       `User Agent: ${navigator.userAgent}`,
       `Платформа: ${navigator.platform}`,
       `Язык: ${navigator.language}`,
@@ -414,7 +419,6 @@ export default function App() {
           mods: installedMods.filter((m) => m.profile === profileName),
           modStates,
           javaPath: javaPath || undefined,
-          mcined,
           mcFullscreen,
           mcWidth: mcFullscreen ? undefined : mcWidth,
           mcHeight: mcFullscreen ? undefined : mcHeight,

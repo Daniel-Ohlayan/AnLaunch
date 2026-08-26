@@ -152,7 +152,7 @@ export function findCompatibleFile(
   return primary ?? null;
 }
 
-export type ModSource = "modrinth";
+export type ModSource = "modrinth" | "curseforge";
 
 export interface InstalledMod {
   id: string;

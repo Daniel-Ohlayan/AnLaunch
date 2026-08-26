@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ModLoader } from "../lib/modrinth";
 import type { ProfileInfo } from "../types/electron";
+import { getActiveAccount } from "../lib/accounts";
+import { buildLaunchPlan } from "../lib/launchPlan";
 import { GaugeIcon, ShieldIcon, CubeIcon, DownloadIcon, SettingsIcon } from "./icons";
 
 const MC_LANGUAGES = [
@@ -123,7 +125,7 @@ export default function SettingsView({
   const [autoStart, setAutoStart] = useState(false);
   const [sysMem, setSysMem] = useState<{ totalGB: number; freeGB: number; cpus: number } | null>(null);
 
-  const [appVersion, setAppVersion] = useState("1.0.2");
+  const [appVersion, setAppVersion] = useState("1.0.3");
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "error">("idle");
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
@@ -133,6 +135,58 @@ export default function SettingsView({
     if (!sysMem) return 16;
     return Math.max(4, sysMem.totalGB - 1);
   }, [sysMem]);
+
+  const launchPlan = useMemo(() => {
+    const mods = (() => {
+      try {
+        const list = JSON.parse(localStorage.getItem("anlaunch_installed_mods") || "[]") as { profile?: string }[];
+        return list.filter((m) => m.profile === activeProfile || !m.profile).length;
+      } catch {
+        return 0;
+      }
+    })();
+    return buildLaunchPlan({
+      account: getActiveAccount(),
+      version: gameVersion,
+      loader,
+      ram,
+      ramMin,
+      profile: activeProfile,
+      javaPath,
+      mcFullscreen,
+      mcWidth,
+      mcHeight,
+      jvmArgs,
+      mcLanguage,
+      serverHost,
+      serverPort,
+      closeOnLaunch,
+      minimizeOnLaunch,
+      openLogsOnLaunch,
+      confirmLaunch,
+      alwaysOnTop,
+      modsCount: mods,
+    });
+  }, [
+    gameVersion,
+    loader,
+    ram,
+    ramMin,
+    activeProfile,
+    javaPath,
+    mcFullscreen,
+    mcWidth,
+    mcHeight,
+    jvmArgs,
+    mcLanguage,
+    serverHost,
+    serverPort,
+    closeOnLaunch,
+    minimizeOnLaunch,
+    openLogsOnLaunch,
+    confirmLaunch,
+    alwaysOnTop,
+  ]);
 
   useEffect(() => {
     setJavaInput(javaPath);
@@ -594,6 +648,40 @@ export default function SettingsView({
                   onChange={(e) => setServerPort(Math.max(1, Math.min(65535, Number(e.target.value) || 25565)))}
                   className="w-24 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-center text-sm text-white outline-none focus:border-emerald-400/50"
                 />
+              </div>
+            </Section>
+
+            <Section title="Как запустится игра" icon={<PlayPreviewIcon />}>
+              <p className="mb-2 px-2 text-xs text-white/45">
+                Меняйте настройки выше — список обновляется сразу. Это те аргументы, которые уйдут в Minecraft.
+              </p>
+              <div className="space-y-1 px-1">
+                {launchPlan.rows.map((row) => (
+                  <div key={row.label} className="flex items-start justify-between gap-3 rounded-lg px-2 py-1.5">
+                    <span className="text-xs text-white/40">{row.label}</span>
+                    <span className="max-w-[60%] text-right text-xs font-medium text-white/80">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2 font-mono text-[11px] leading-relaxed text-emerald-200/80">
+                {launchPlan.command}
+              </div>
+              <div className="mt-2 flex justify-end px-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        launchPlan.rows.map((r) => `${r.label}: ${r.value}`).join("\n") + "\n\n" + launchPlan.command
+                      );
+                      showToast("План запуска скопирован");
+                    } catch {
+                      showToast("Не удалось скопировать", "err");
+                    }
+                  }}
+                  className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/[0.1]"
+                >
+                  Копировать план
+                </button>
               </div>
             </Section>
 
@@ -1069,6 +1157,14 @@ function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+function PlayPreviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 4l14 8-14 8z" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 
