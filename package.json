@@ -21,7 +21,7 @@
     "preview": "npx vite preview",
     "build": "npx vite build",
     "electron:dev": "node scripts/dev.js",
-    "electron:build": "npx vite build && npx electron-builder --config electron-builder.json --win --x64 --publish never && node scripts/ensure-latest-yml.js",
+    "electron:build": "npx vite build && npx electron-builder --config electron-builder.json --win --x64 --publish never && node scripts/ensure-latest-yml.js && node scripts/upload-github-assets.js",
     "electron:start": "npx electron ."
   },
   "dependencies": {
