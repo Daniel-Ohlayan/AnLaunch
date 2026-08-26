@@ -1,8 +1,33 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, Notification } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, Notification, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { execSync } = require("child_process");
+
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.anlaunch.launcher");
+}
+
+function resolveAppIcon() {
+  const candidates = [
+    path.join(__dirname, "icon.ico"),
+    path.join(__dirname, "icon.png"),
+    path.join(__dirname, "../build/icon.ico"),
+    path.join(__dirname, "../public/icon.png"),
+    path.join(process.resourcesPath || "", "icon.ico"),
+  ];
+  for (const file of candidates) {
+    if (file && fs.existsSync(file)) return file;
+  }
+  return undefined;
+}
+
+function loadAppIcon() {
+  const file = resolveAppIcon();
+  if (!file) return undefined;
+  const image = nativeImage.createFromPath(file);
+  return image.isEmpty() ? undefined : image;
+}
 
 let autoUpdater = null;
 try {
@@ -23,15 +48,17 @@ process.on("uncaughtException", (error) => {
 });
 
 function createWindow() {
+  const icon = loadAppIcon();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
     minWidth: 960,
     minHeight: 640,
     title: "AnLaunch — Minecraft Launcher",
-    icon: path.join(__dirname, "../public/icon.png"),
+    icon,
     frame: true,
     backgroundColor: "#06070a",
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -39,7 +66,8 @@ function createWindow() {
       sandbox: false,
     },
   });
-
+  if (icon) mainWindow.setIcon(icon);
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.setMenuBarVisibility(false);
 
   if (isDev) {
@@ -90,12 +118,14 @@ function createLogsWindow() {
     logsWindow.focus();
     return logsWindow;
   }
+  const icon = loadAppIcon();
   logsWindow = new BrowserWindow({
     width: 900,
     height: 600,
     minWidth: 600,
     minHeight: 400,
     title: "AnLaunch — Логи запуска",
+    icon,
     backgroundColor: "#0a0a0f",
     frame: true,
     autoHideMenuBar: true,
@@ -108,6 +138,7 @@ function createLogsWindow() {
       additionalArguments: ["--is-logs-window"],
     },
   });
+  if (icon) logsWindow.setIcon(icon);
   logsWindow.setMenuBarVisibility(false);
   logsWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
     query: { logs: "1" },
