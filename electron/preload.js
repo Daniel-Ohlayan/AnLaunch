@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Microsoft
   loginMicrosoft: () => ipcRenderer.invoke("login-microsoft"),
+  loginMicrosoftCode: (codeOrUrl) => ipcRenderer.invoke("login-microsoft-code", codeOrUrl),
+  getMicrosoftAuthUrl: () => ipcRenderer.invoke("get-microsoft-auth-url"),
+  openMicrosoftLogin: () => ipcRenderer.invoke("open-microsoft-login"),
   refreshMicrosoft: (token) => ipcRenderer.invoke("refresh-microsoft", token),
 
   // Отдельное окно логов

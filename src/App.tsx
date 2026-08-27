@@ -19,7 +19,7 @@ import {
   getSubfolderForType,
 } from "./lib/modrinth";
 import type { Account } from "./lib/accounts";
-import { getActiveAccount } from "./lib/accounts";
+import { getActiveAccount, saveMicrosoftAccount } from "./lib/accounts";
 import { launchMinecraftReal } from "./lib/minecraft";
 import { PlayIcon } from "./components/icons";
 import type { ProfileInfo } from "./types/electron";
@@ -405,6 +405,27 @@ export default function App() {
       try {
         addLog("info", `Запуск в профиле «${profileName}»`);
 
+        let account = activeAccount;
+        if (
+          (account.type === "microsoft" || account.type === "premium") &&
+          account.refreshToken
+        ) {
+          setLaunching((l) => ({ ...l, progress: 6, label: "Обновление сессии Microsoft..." }));
+          addLog("info", "Обновление сессии Microsoft...");
+          const refreshed = await window.electronAPI.refreshMicrosoft(account.refreshToken);
+          if (refreshed.success) {
+            account = saveMicrosoftAccount(refreshed.account);
+            setActiveAccount(account);
+            addLog("info", `Сессия Microsoft: ${account.username}`);
+          } else if (!account.accessToken) {
+            throw new Error(refreshed.error || "Сессия Microsoft истекла. Войдите снова.");
+          } else {
+            addLog("warn", `Не удалось обновить сессию: ${refreshed.error}. Пробую текущий токен.`);
+          }
+        } else if (account.type === "microsoft" && !account.accessToken) {
+          throw new Error("Нет токена Microsoft. Войдите в аккаунт заново.");
+        }
+
         setLaunching((l) => ({ ...l, progress: 10, label: "Проверка Java..." }));
         addLog("info", "Проверка Java...");
 
@@ -416,7 +437,7 @@ export default function App() {
         });
 
         const result = await launchMinecraftReal({
-          account: activeAccount,
+          account,
           version: gameVersion,
           loader,
           ram,

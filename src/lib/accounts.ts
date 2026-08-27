@@ -5,6 +5,7 @@ export interface Account {
   id: string;
   username: string;
   uuid: string;
+  xuid?: string;
   type: "offline" | "premium" | "microsoft";
   accessToken?: string;
   refreshToken?: string;

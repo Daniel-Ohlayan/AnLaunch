@@ -11,6 +11,7 @@ export interface MicrosoftAccount {
   id: string;
   username: string;
   uuid: string;
+  xuid?: string;
   type: "microsoft";
   accessToken: string;
   refreshToken: string;
@@ -40,7 +41,7 @@ export interface ElectronAPI {
   setAutoStart: (enabled: boolean) => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
   getAutoStart: () => Promise<{ success: boolean; enabled: boolean }>;
   launchMinecraftReal: (config: {
-    account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string };
+    account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string; refreshToken?: string };
     version: string;
     loader: string;
     ram: number;
@@ -124,6 +125,11 @@ export interface ElectronAPI {
   loginMicrosoft: () => Promise<
     { success: true; account: MicrosoftAccount } | { success: false; error: string }
   >;
+  loginMicrosoftCode: (codeOrUrl: string) => Promise<
+    { success: true; account: MicrosoftAccount } | { success: false; error: string }
+  >;
+  getMicrosoftAuthUrl: () => Promise<{ success: true; url: string } | { success: false; error?: string }>;
+  openMicrosoftLogin: () => Promise<{ success: boolean; error?: string }>;
   refreshMicrosoft: (token: string) => Promise<
     { success: true; account: MicrosoftAccount } | { success: false; error: string }
   >;

@@ -70,8 +70,9 @@ export async function launchMinecraftReal(config: LaunchConfig): Promise<LaunchR
       account: {
         username: config.account.username,
         uuid: config.account.uuid,
-        accessToken: (config.account as Account & { accessToken?: string }).accessToken,
+        accessToken: config.account.accessToken,
         type: config.account.type,
+        xuid: config.account.xuid,
       },
       version: config.version,
       loader: config.loader,

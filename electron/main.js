@@ -551,15 +551,42 @@ ipcMain.handle("remove-mod-from-profile", async (_event, { profile, fileName, su
 
 // ── IPC: вход через Microsoft ────────────────────────────────
 
+function sendAuthProgress(msg) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("auth-progress", msg);
+  }
+}
+
 ipcMain.handle("login-microsoft", async () => {
   const { loginMicrosoft } = require("./msauth");
   try {
-    const account = await loginMicrosoft(mainWindow, (msg) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("auth-progress", msg);
-      }
-    });
+    const account = await loginMicrosoft(mainWindow, sendAuthProgress);
     return { success: true, account };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("login-microsoft-code", async (_event, codeOrUrl) => {
+  const { loginMicrosoftWithCode } = require("./msauth");
+  try {
+    const account = await loginMicrosoftWithCode(codeOrUrl, sendAuthProgress);
+    return { success: true, account };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-microsoft-auth-url", () => {
+  const { getAuthUrl } = require("./msauth");
+  return { success: true, url: getAuthUrl() };
+});
+
+ipcMain.handle("open-microsoft-login", async () => {
+  const { openMicrosoftLoginExternal } = require("./msauth");
+  try {
+    await openMicrosoftLoginExternal();
+    return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }

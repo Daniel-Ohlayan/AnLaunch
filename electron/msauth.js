@@ -1,50 +1,96 @@
-// Настоящая аутентификация Microsoft / Xbox Live / Minecraft
-// Поток: Microsoft OAuth → Xbox Live → XSTS → Minecraft → профиль
-//
-// ВАЖНО: чтобы вход через Microsoft работал, нужно зарегистрировать
-// приложение в Azure Portal (portal.azure.com → App registrations):
-//   1. New registration → тип "Personal Microsoft accounts"
-//   2. Redirect URI (тип "Mobile and desktop"): http://localhost:НОМЕР_ПОРТА
-//   3. Скопируйте Application (client) ID и вставьте в CLIENT_ID ниже.
-//   4. В API permissions включите XboxLive.signin
-//
-// Без своего CLIENT_ID Microsoft вернёт ошибку "unauthorized_client".
+// Microsoft → Xbox Live → XSTS → Minecraft
+// Используем публичный Client ID официального лаунчера Minecraft —
+// отдельная регистрация в Azure не нужна.
+// Документация: https://minecraft.wiki/w/Microsoft_authentication
 
-const { BrowserWindow } = require("electron");
+const { BrowserWindow, shell } = require("electron");
 const https = require("https");
 
-// 👉 ЗАМЕНИТЕ на ваш Client ID из Azure Portal
-const CLIENT_ID = "00000000-0000-0000-0000-000000000000";
-const REDIRECT_URI = "https://login.microsoftonline.com/common/oauth2/nativeclient";
-const SCOPE = "XboxLive.signin offline_access";
+const CLIENT_ID = "00000000402b5328";
+const REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf";
+const SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
-function httpsJSON(options, body) {
+const XSTS_ERRORS = {
+  2148916233: "У этого Microsoft-аккаунта нет профиля Xbox. Создайте его на xbox.com и повторите вход.",
+  2148916235: "Xbox Live недоступен в стране этого аккаунта.",
+  2148916236: "Нужно подтвердить возраст на account.microsoft.com.",
+  2148916237: "Детский аккаунт: добавьте его во взрослый Family на account.microsoft.com.",
+  2148916238: "Детский аккаунт: его должен подтвердить взрослый в Microsoft Family.",
+};
+
+function getAuthUrl() {
+  const q = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: "code",
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPE,
+    display: "touch",
+    prompt: "select_account",
+  });
+  return `https://login.live.com/oauth20_authorize.srf?${q.toString()}`;
+}
+
+function extractCode(url) {
+  if (!url || typeof url !== "string") return { code: null, error: null };
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { code: null, error: null };
+  }
+  const isRedirect =
+    url.startsWith(REDIRECT_URI) ||
+    parsed.pathname.endsWith("/oauth20_desktop.srf") ||
+    parsed.pathname.endsWith("/oauth2/nativeclient");
+  if (!isRedirect) return { code: null, error: null };
+  const code = parsed.searchParams.get("code");
+  const error = parsed.searchParams.get("error");
+  const desc = parsed.searchParams.get("error_description");
+  return { code, error: error ? desc || error : null };
+}
+
+function httpsRaw(options, body) {
   return new Promise((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => {
-        try {
-          const parsed = data ? JSON.parse(data) : {};
-          if (res.statusCode >= 400) {
-            reject(new Error(parsed.error_description || parsed.error || `HTTP ${res.statusCode}`));
-          } else {
-            resolve(parsed);
-          }
-        } catch (e) {
-          reject(new Error(`Ошибка парсинга ответа: ${data.slice(0, 200)}`));
-        }
-      });
-    });
+    const req = https.request(
+      {
+        ...options,
+        headers: {
+          "User-Agent": CHROME_UA,
+          Accept: "application/json",
+          ...(options.headers || {}),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ status: res.statusCode || 0, data }));
+      }
+    );
     req.on("error", reject);
+    req.setTimeout(30000, () => {
+      req.destroy(new Error("Сервер Microsoft не ответил (таймаут). Проверьте сеть или VPN."));
+    });
     if (body) req.write(body);
     req.end();
   });
 }
 
-function postForm(host, path, form) {
+async function httpsJSON(options, body) {
+  const { status, data } = await httpsRaw(options, body);
+  let parsed = {};
+  try {
+    parsed = data ? JSON.parse(data) : {};
+  } catch {
+    throw new Error(`Ошибка ответа Microsoft (HTTP ${status}): ${String(data).slice(0, 180)}`);
+  }
+  return { status, parsed };
+}
+
+async function postForm(host, path, form) {
   const body = new URLSearchParams(form).toString();
-  return httpsJSON(
+  const { status, parsed } = await httpsJSON(
     {
       host,
       path,
@@ -56,111 +102,150 @@ function postForm(host, path, form) {
     },
     body
   );
+  if (status >= 400) {
+    throw new Error(parsed.error_description || parsed.error || `Microsoft token HTTP ${status}`);
+  }
+  return parsed;
 }
 
-function postJSON(host, path, obj, extraHeaders = {}) {
+async function postJSON(host, path, obj, extraHeaders = {}) {
   const body = JSON.stringify(obj);
-  return httpsJSON(
+  const { status, parsed } = await httpsJSON(
     {
       host,
       path,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json",
         "Content-Length": Buffer.byteLength(body),
         ...extraHeaders,
       },
     },
     body
   );
+  return { status, parsed };
 }
 
-// Шаг 1: получить authorization code через окно логина Microsoft
 function getAuthCode(parentWindow) {
   return new Promise((resolve, reject) => {
-    const authUrl =
-      `https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize` +
-      `?client_id=${encodeURIComponent(CLIENT_ID)}` +
-      `&response_type=code` +
-      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-      `&scope=${encodeURIComponent(SCOPE)}` +
-      `&prompt=select_account`;
-
     const authWindow = new BrowserWindow({
       width: 520,
-      height: 680,
-      parent: parentWindow,
-      modal: true,
+      height: 700,
+      parent: parentWindow || undefined,
+      modal: !!parentWindow,
       show: true,
       title: "Вход через Microsoft",
       autoHideMenuBar: true,
-      webPreferences: { nodeIntegration: false, contextIsolation: true },
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        partition: `temp:msauth-${Date.now()}`,
+      },
     });
 
-    authWindow.loadURL(authUrl);
+    authWindow.webContents.setUserAgent(CHROME_UA);
+    authWindow.setMenuBarVisibility(false);
 
     let done = false;
-    const handleUrl = (url) => {
+    const finish = (err, code) => {
       if (done) return;
-      if (url.startsWith(REDIRECT_URI)) {
-        const parsed = new URL(url);
-        const code = parsed.searchParams.get("code");
-        const error = parsed.searchParams.get("error");
-        done = true;
-        authWindow.close();
-        if (code) resolve(code);
-        else reject(new Error(error || "Вход отменён"));
-      }
+      done = true;
+      try {
+        if (!authWindow.isDestroyed()) authWindow.close();
+      } catch {}
+      if (err) reject(err);
+      else resolve(code);
+    };
+
+    const handleUrl = (url) => {
+      const { code, error } = extractCode(url);
+      if (code) finish(null, code);
+      else if (error) finish(new Error(error));
     };
 
     authWindow.webContents.on("will-redirect", (_e, url) => handleUrl(url));
     authWindow.webContents.on("will-navigate", (_e, url) => handleUrl(url));
+    authWindow.webContents.on("did-navigate", (_e, url) => handleUrl(url));
+    authWindow.webContents.on("did-redirect-navigation", (_e, url) => handleUrl(url));
+    authWindow.webContents.on("did-navigate-in-page", (_e, url) => handleUrl(url));
+
+    try {
+      authWindow.webContents.session.webRequest.onBeforeRequest(
+        { urls: ["https://login.live.com/oauth20_desktop.srf*"] },
+        (details, callback) => {
+          handleUrl(details.url);
+          callback({ cancel: true });
+        }
+      );
+    } catch {}
 
     authWindow.on("closed", () => {
       if (!done) reject(new Error("Окно входа закрыто"));
     });
+
+    authWindow.loadURL(getAuthUrl()).catch((e) => {
+      finish(
+        new Error(
+          `Не удалось открыть страницу Microsoft: ${e.message}. Если login.live.com заблокирован, включите VPN или войдите через браузер.`
+        )
+      );
+    });
   });
 }
 
-// Шаг 2: обменять code на токены Microsoft
 async function exchangeCode(code) {
-  return postForm("login.microsoftonline.com", "/consumers/oauth2/v2.0/token", {
+  return postForm("login.live.com", "/oauth20_token.srf", {
     client_id: CLIENT_ID,
-    grant_type: "authorization_code",
     code,
+    grant_type: "authorization_code",
     redirect_uri: REDIRECT_URI,
     scope: SCOPE,
   });
 }
 
-// Обновление токена
 async function refreshToken(refresh_token) {
-  return postForm("login.microsoftonline.com", "/consumers/oauth2/v2.0/token", {
+  return postForm("login.live.com", "/oauth20_token.srf", {
     client_id: CLIENT_ID,
-    grant_type: "refresh_token",
     refresh_token,
+    grant_type: "refresh_token",
     scope: SCOPE,
   });
 }
 
-// Шаг 3: Xbox Live
 async function authXboxLive(msAccessToken) {
-  const res = await postJSON("user.auth.xboxlive.com", "/user/authenticate", {
+  const payload = {
     Properties: {
       AuthMethod: "RPS",
       SiteName: "user.auth.xboxlive.com",
-      RpsTicket: `d=${msAccessToken}`,
+      RpsTicket: msAccessToken,
     },
     RelyingParty: "http://auth.xboxlive.com",
     TokenType: "JWT",
-  });
-  return { token: res.Token, uhs: res.DisplayClaims.xui[0].uhs };
+  };
+
+  let { status, parsed } = await postJSON("user.auth.xboxlive.com", "/user/authenticate", payload);
+
+  // Старый Azure-поток использует префикс d=
+  if (status >= 400) {
+    payload.Properties.RpsTicket = `d=${msAccessToken}`;
+    ({ status, parsed } = await postJSON("user.auth.xboxlive.com", "/user/authenticate", payload));
+  }
+
+  if (status >= 400 || !parsed.Token) {
+    throw new Error(parsed.Message || parsed.errorMessage || `Xbox Live HTTP ${status}`);
+  }
+
+  const xui = parsed.DisplayClaims && parsed.DisplayClaims.xui && parsed.DisplayClaims.xui[0];
+  return {
+    token: parsed.Token,
+    uhs: xui && xui.uhs,
+    xuid: xui && xui.xid,
+  };
 }
 
-// Шаг 4: XSTS
 async function authXSTS(xblToken) {
-  const res = await postJSON("xsts.auth.xboxlive.com", "/xsts/authorize", {
+  const { status, parsed } = await postJSON("xsts.auth.xboxlive.com", "/xsts/authorize", {
     Properties: {
       SandboxId: "RETAIL",
       UserTokens: [xblToken],
@@ -168,18 +253,28 @@ async function authXSTS(xblToken) {
     RelyingParty: "rp://api.minecraftservices.com/",
     TokenType: "JWT",
   });
-  return res.Token;
+
+  if (status >= 400 || !parsed.Token) {
+    const xerr = parsed.XErr || parsed.xerr;
+    throw new Error(XSTS_ERRORS[xerr] || parsed.Message || `XSTS ошибка ${xerr || status}`);
+  }
+
+  const xui = parsed.DisplayClaims && parsed.DisplayClaims.xui && parsed.DisplayClaims.xui[0];
+  return { token: parsed.Token, uhs: xui && xui.uhs };
 }
 
-// Шаг 5: Minecraft
 async function authMinecraft(uhs, xstsToken) {
-  const res = await postJSON("api.minecraftservices.com", "/authentication/login_with_xbox", {
-    identityToken: `XBL3.0 x=${uhs};${xstsToken}`,
-  });
-  return res.access_token;
+  const { status, parsed } = await postJSON(
+    "api.minecraftservices.com",
+    "/authentication/login_with_xbox",
+    { identityToken: `XBL3.0 x=${uhs};${xstsToken}` }
+  );
+  if (status >= 400 || !parsed.access_token) {
+    throw new Error(parsed.errorMessage || parsed.error || `Minecraft login HTTP ${status}`);
+  }
+  return parsed.access_token;
 }
 
-// Шаг 6: профиль Minecraft (ник + uuid)
 function getMinecraftProfile(mcAccessToken) {
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -187,93 +282,113 @@ function getMinecraftProfile(mcAccessToken) {
         host: "api.minecraftservices.com",
         path: "/minecraft/profile",
         method: "GET",
-        headers: { Authorization: `Bearer ${mcAccessToken}` },
+        headers: {
+          Authorization: `Bearer ${mcAccessToken}`,
+          "User-Agent": CHROME_UA,
+          Accept: "application/json",
+        },
       },
       (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
+          let parsed = {};
           try {
-            const parsed = JSON.parse(data);
-            if (res.statusCode === 404) {
-              reject(new Error("У этого аккаунта Microsoft нет купленного Minecraft."));
-            } else if (parsed.id) {
-              resolve(parsed);
-            } else {
-              reject(new Error(parsed.errorMessage || "Не удалось получить профиль"));
-            }
-          } catch (e) {
-            reject(e);
+            parsed = data ? JSON.parse(data) : {};
+          } catch {
+            return reject(new Error(`Профиль Minecraft: неверный ответ (HTTP ${res.statusCode})`));
+          }
+          if (res.statusCode === 404) {
+            reject(new Error("У этого аккаунта Microsoft нет купленного Minecraft: Java Edition."));
+          } else if (parsed.id && parsed.name) {
+            resolve(parsed);
+          } else {
+            reject(new Error(parsed.errorMessage || parsed.error || "Не удалось получить профиль Minecraft"));
           }
         });
       }
     );
     req.on("error", reject);
+    req.setTimeout(30000, () => {
+      req.destroy(new Error("api.minecraftservices.com не ответил. Проверьте сеть или VPN."));
+    });
     req.end();
   });
 }
 
-// Полный цикл входа
-async function loginMicrosoft(parentWindow, onProgress) {
-  const log = (m) => onProgress && onProgress(m);
+function formatAccount(profile, mcToken, refresh, xuid) {
+  const raw = String(profile.id).replace(/-/g, "");
+  const uuid = `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
+  return {
+    id: `ms_${raw}`,
+    username: profile.name,
+    uuid,
+    xuid: xuid ? String(xuid) : "0",
+    type: "microsoft",
+    accessToken: mcToken,
+    refreshToken: refresh || "",
+    createdAt: Date.now(),
+  };
+}
 
-  if (CLIENT_ID.startsWith("00000000")) {
-    throw new Error(
-      "Не настроен Azure Client ID. Откройте electron/msauth.js и вставьте свой CLIENT_ID из Azure Portal."
-    );
-  }
-
-  log("Открываю окно входа Microsoft…");
-  const code = await getAuthCode(parentWindow);
-
-  log("Обмен кода на токен…");
-  const msTokens = await exchangeCode(code);
+async function completeWithMsTokens(msTokens, log) {
+  if (!msTokens.access_token) throw new Error("Microsoft не вернул access_token");
 
   log("Авторизация в Xbox Live…");
-  const { token: xblToken, uhs } = await authXboxLive(msTokens.access_token);
+  const xbox = await authXboxLive(msTokens.access_token);
+  if (!xbox.uhs) throw new Error("Xbox Live не вернул user hash");
 
   log("Проверка XSTS…");
-  const xstsToken = await authXSTS(xblToken);
+  const xsts = await authXSTS(xbox.token);
+  const uhs = xsts.uhs || xbox.uhs;
 
   log("Вход в Minecraft…");
-  const mcToken = await authMinecraft(uhs, xstsToken);
+  const mcToken = await authMinecraft(uhs, xsts.token);
 
   log("Загрузка профиля…");
   const profile = await getMinecraftProfile(mcToken);
 
-  // Форматируем UUID с дефисами
-  const raw = profile.id;
-  const uuid = `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
-
-  return {
-    id: `ms_${raw}`,
-    username: profile.name,
-    uuid,
-    type: "microsoft",
-    accessToken: mcToken,
-    refreshToken: msTokens.refresh_token,
-    createdAt: Date.now(),
-  };
+  return formatAccount(profile, mcToken, msTokens.refresh_token, xbox.xuid);
 }
 
-// Обновление сессии Microsoft (тихий вход)
+async function loginMicrosoft(parentWindow, onProgress) {
+  const log = (m) => onProgress && onProgress(m);
+  log("Открываю окно входа Microsoft…");
+  const code = await getAuthCode(parentWindow);
+  log("Обмен кода на токен…");
+  const msTokens = await exchangeCode(code);
+  return completeWithMsTokens(msTokens, log);
+}
+
+async function loginMicrosoftWithCode(codeOrUrl, onProgress) {
+  const log = (m) => onProgress && onProgress(m);
+  let code = String(codeOrUrl || "").trim();
+  const extracted = extractCode(code);
+  if (extracted.code) code = extracted.code;
+  else {
+    const m = code.match(/[?&]code=([^&]+)/);
+    if (m) code = decodeURIComponent(m[1]);
+  }
+  if (!code || code.length < 8) throw new Error("Вставьте ссылку со страницы после входа или сам код.");
+  log("Обмен кода на токен…");
+  const msTokens = await exchangeCode(code);
+  return completeWithMsTokens(msTokens, log);
+}
+
 async function refreshMicrosoft(refresh_token) {
+  if (!refresh_token) throw new Error("Нет refresh-токена. Войдите через Microsoft заново.");
   const msTokens = await refreshToken(refresh_token);
-  const { token: xblToken, uhs } = await authXboxLive(msTokens.access_token);
-  const xstsToken = await authXSTS(xblToken);
-  const mcToken = await authMinecraft(uhs, xstsToken);
-  const profile = await getMinecraftProfile(mcToken);
-  const raw = profile.id;
-  const uuid = `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
-  return {
-    id: `ms_${raw}`,
-    username: profile.name,
-    uuid,
-    type: "microsoft",
-    accessToken: mcToken,
-    refreshToken: msTokens.refresh_token,
-    createdAt: Date.now(),
-  };
+  return completeWithMsTokens(msTokens, () => {});
 }
 
-module.exports = { loginMicrosoft, refreshMicrosoft };
+function openMicrosoftLoginExternal() {
+  return shell.openExternal(getAuthUrl());
+}
+
+module.exports = {
+  loginMicrosoft,
+  loginMicrosoftWithCode,
+  refreshMicrosoft,
+  getAuthUrl,
+  openMicrosoftLoginExternal,
+};

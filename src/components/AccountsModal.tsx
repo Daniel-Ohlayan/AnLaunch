@@ -28,9 +28,9 @@ export default function AccountsModal({
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
   const [msLoading, setMsLoading] = useState(false);
   const [msStatus, setMsStatus] = useState<string | null>(null);
-  const [manualToken, setManualToken] = useState("");
-  const [manualUuid, setManualUuid] = useState("");
-  const [showManual, setShowManual] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState("");
+  const [pasteUrl, setPasteUrl] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -41,9 +41,22 @@ export default function AccountsModal({
     }
   }, [open]);
 
+  async function finishMicrosoft(res: { success: true; account: Account } | { success: false; error: string }) {
+    if (res.success) {
+      const account = saveMicrosoftAccount(res.account);
+      setAccounts(getAllAccounts());
+      onChange(account);
+      setMsStatus(null);
+      setPasteUrl("");
+      onClose();
+      return;
+    }
+    setError(res.error || "Не удалось войти через Microsoft");
+  }
+
   async function handleMicrosoftLogin() {
     if (!window.electronAPI) {
-      setError("Вход через Microsoft доступен только в десктоп-версии (Electron).");
+      setError("Вход через Microsoft доступен только в установленном лаунчере, не в браузере.");
       return;
     }
     setError(null);
@@ -53,15 +66,40 @@ export default function AccountsModal({
     const unsub = window.electronAPI.onAuthProgress((msg) => setMsStatus(msg));
     try {
       const res = await window.electronAPI.loginMicrosoft();
-      if (res.success) {
-        const account = saveMicrosoftAccount(res.account as unknown as Account);
-        setAccounts(getAllAccounts());
-        onChange(account);
-        setMsStatus(null);
-        onClose();
-      } else {
-        setError(res.error || "Не удалось войти через Microsoft");
-      }
+      await finishMicrosoft(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка входа Microsoft");
+    } finally {
+      unsub();
+      setMsLoading(false);
+    }
+  }
+
+  async function handleOpenBrowser() {
+    if (!window.electronAPI) {
+      setError("Вход через Microsoft доступен только в установленном лаунчере.");
+      return;
+    }
+    setError(null);
+    setShowBrowser(true);
+    try {
+      const info = await window.electronAPI.getMicrosoftAuthUrl();
+      if (info.success) setBrowserUrl(info.url);
+      await window.electronAPI.openMicrosoftLogin();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось открыть браузер");
+    }
+  }
+
+  async function handlePasteCode() {
+    if (!window.electronAPI) return;
+    setError(null);
+    setMsLoading(true);
+    setMsStatus("Обмен кода…");
+    const unsub = window.electronAPI.onAuthProgress((msg) => setMsStatus(msg));
+    try {
+      const res = await window.electronAPI.loginMicrosoftCode(pasteUrl);
+      await finishMicrosoft(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка входа Microsoft");
     } finally {
@@ -150,7 +188,7 @@ export default function AccountsModal({
           <button
             onClick={handleMicrosoftLogin}
             disabled={msLoading}
-            className="mb-3 flex w-full items-center justify-center gap-3 rounded-xl bg-[#2f2f9e] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#3a3ab5] disabled:opacity-60"
+            className="mb-2 flex w-full items-center justify-center gap-3 rounded-xl bg-[#2f2f9e] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#3a3ab5] disabled:opacity-60"
           >
             <svg viewBox="0 0 23 23" className="h-5 w-5">
               <rect x="1" y="1" width="10" height="10" fill="#f25022" />
@@ -161,70 +199,45 @@ export default function AccountsModal({
             {msLoading ? msStatus || "Вход…" : "Войти через Microsoft"}
           </button>
 
-          {/* Manual token entry for Russia */}
           <button
-            onClick={() => setShowManual(!showManual)}
+            onClick={() => {
+              setShowBrowser(!showBrowser);
+              if (!showBrowser) handleOpenBrowser();
+            }}
+            disabled={msLoading}
             className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-white/60 transition hover:bg-white/[0.06]"
           >
-            🔑 Ввести токен вручную (для России)
+            Войти через браузер (если окно не открывается)
           </button>
 
-          {showManual && (
+          {showBrowser && (
             <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
-              <div className="mb-2 text-xs text-white/50">
-                Получите токен на{" "}
-                <a href="https://mclo.gs" target="_blank" rel="noreferrer" className="text-blue-300 underline">
-                  mclo.gs
-                </a>{" "}
-                или{" "}
-                <a href="https://authserver.mojang.com" target="_blank" rel="noreferrer" className="text-blue-300 underline">
-                  authserver.mojang.com
-                </a>{" "}
-                и вставьте сюда.
-              </div>
+              <p className="mb-2 text-xs leading-relaxed text-white/55">
+                1. Войдите в Microsoft в открывшемся браузере.
+                2. После входа откроется пустая страница — скопируйте её адрес
+                (начинается с login.live.com/oauth20_desktop.srf) и вставьте сюда.
+                Если login.live.com не открывается, включите VPN.
+              </p>
+              {browserUrl && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(browserUrl).catch(() => {})}
+                  className="mb-2 text-[11px] text-blue-300 underline"
+                >
+                  Скопировать ссылку входа
+                </button>
+              )}
               <input
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                placeholder="Ник в Minecraft…"
-                className="mb-2 w-full rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-              />
-              <input
-                value={manualToken}
-                onChange={(e) => setManualToken(e.target.value)}
-                placeholder="Access Token…"
-                className="mb-2 w-full rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-              />
-              <input
-                value={manualUuid}
-                onChange={(e) => setManualUuid(e.target.value)}
-                placeholder="UUID (необязательно)…"
+                value={pasteUrl}
+                onChange={(e) => setPasteUrl(e.target.value)}
+                placeholder="Вставьте ссылку с code=…"
                 className="mb-2 w-full rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
               />
               <button
-                onClick={() => {
-                  setError(null);
-                  const name = newUsername.trim();
-                  if (!name) return setError("Введите ник");
-                  const uuid = manualUuid.trim() || `00000000-0000-0000-0000-${Date.now().toString(16)}`;
-                  const account: Account = {
-                    id: `token_${Date.now()}`,
-                    username: name,
-                    uuid,
-                    type: "premium",
-                    accessToken: manualToken.trim(),
-                    createdAt: Date.now(),
-                  };
-                  saveMicrosoftAccount(account);
-                  setAccounts(getAllAccounts());
-                  onChange(account);
-                  setShowManual(false);
-                  setManualToken("");
-                  setManualUuid("");
-                  onClose();
-                }}
-                className="w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300"
+                onClick={handlePasteCode}
+                disabled={msLoading || !pasteUrl.trim()}
+                className="w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300 disabled:opacity-50"
               >
-                Сохранить
+                {msLoading ? msStatus || "Вход…" : "Продолжить вход"}
               </button>
             </div>
           )}
