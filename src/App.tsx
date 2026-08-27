@@ -499,7 +499,7 @@ export default function App() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 w-full items-stretch justify-center overflow-hidden bg-[#06070a] p-0 sm:p-4 lg:p-6">
+    <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-[#06070a]">
       {/* Animated aurora background */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="aurora-blob absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-emerald-500/20" />
@@ -507,7 +507,7 @@ export default function App() {
         <div className="aurora-blob absolute bottom-[-160px] left-1/3 h-[420px] w-[420px] rounded-full bg-cyan-500/10" style={{ animationDelay: "-16s" }} />
       </div>
 
-      <div className="relative flex h-full min-h-0 w-full max-w-[1400px] flex-col overflow-hidden rounded-none border border-white/[0.06] bg-[#0a0b0f]/85 shadow-2xl backdrop-blur-2xl sm:rounded-3xl">
+      <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#0a0b0f]">
         <TopNav
           active={tab}
           onSelect={setTab}
