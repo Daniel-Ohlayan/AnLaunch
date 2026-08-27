@@ -22,6 +22,22 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   shader: "Шейдеры",
 };
 
+export function loaderLabel(loader: ModLoader): string {
+  if (loader === "vanilla") return "Vanilla";
+  if (loader === "neoforge") return "NeoForge";
+  return loader.charAt(0).toUpperCase() + loader.slice(1);
+}
+
+/** Как на Modrinth: моды/модпаки только с загрузчиком, Vanilla — ресурспаки и датапаки. */
+export function contentTypesForLoader(loader: ModLoader): ProjectType[] {
+  if (loader === "vanilla") return ["resourcepack", "datapack"];
+  return ["mod", "resourcepack", "modpack", "datapack", "shader"];
+}
+
+export function canInstallProjectType(loader: ModLoader, projectType: ProjectType): boolean {
+  return contentTypesForLoader(loader).includes(projectType);
+}
+
 export interface ModHit {
   project_id: string;
   slug: string;
@@ -80,9 +96,13 @@ export async function searchMods(params: {
 }): Promise<SearchResponse> {
   const { query = "", loader, version, index = "downloads", limit = 24, offset = 0, projectType = "mod" } = params;
   const facets: string[][] = [[`project_type:${projectType}`]];
-  // Resourcepacks, shaders, modpacks, datapacks don't need loader filter
-  if (projectType === "mod" && loader && loader !== "vanilla") {
+  if ((projectType === "mod" || projectType === "modpack") && loader && loader !== "vanilla") {
     facets.push([`categories:${loader}`]);
+  }
+  if (projectType === "shader" && loader && loader !== "vanilla") {
+    const shaderLoaders =
+      loader === "forge" || loader === "neoforge" ? ["oculus"] : ["iris"];
+    facets.push(shaderLoaders.map((id) => `categories:${id}`));
   }
   if (version) facets.push([`versions:${version}`]);
 
@@ -109,7 +129,7 @@ export async function getProjectVersions(
     url.searchParams.set("game_versions", JSON.stringify([options.gameVersion]));
   }
   if (
-    options?.projectType === "mod" &&
+    (options?.projectType === "mod" || options?.projectType === "modpack") &&
     options.loader &&
     options.loader !== "vanilla"
   ) {

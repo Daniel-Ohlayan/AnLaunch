@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType } from "../lib/modrinth";
-import { PROJECT_TYPE_LABELS, searchMods, formatDownloads, formatSize } from "../lib/modrinth";
+import {
+  PROJECT_TYPE_LABELS,
+  searchMods,
+  formatDownloads,
+  formatSize,
+  contentTypesForLoader,
+  loaderLabel,
+} from "../lib/modrinth";
 import { SearchIcon, DownloadIcon, CheckIcon, CloseIcon, CubeIcon } from "./icons";
 import { getAccent } from "../lib/accent";
 
@@ -12,8 +19,6 @@ const SORTS: { id: SortIndex; label: string }[] = [
   { id: "updated", label: "Обновлённые" },
 ];
 
-const PROJECT_TYPES: ProjectType[] = ["mod", "resourcepack", "modpack", "datapack", "shader"];
-
 const PROJECT_TYPE_ICONS: Record<ProjectType, string> = {
   mod: "🧩",
   resourcepack: "🎨",
@@ -21,14 +26,6 @@ const PROJECT_TYPE_ICONS: Record<ProjectType, string> = {
   datapack: "💾",
   shader: "✨",
 };
-
-const LOADER_FILTERS: { id: ModLoader | "all"; label: string }[] = [
-  { id: "all", label: "Все" },
-  { id: "fabric", label: "Fabric" },
-  { id: "forge", label: "Forge" },
-  { id: "quilt", label: "Quilt" },
-  { id: "neoforge", label: "NeoForge" },
-];
 
 export default function ModsView({
   gameVersion,
@@ -51,9 +48,9 @@ export default function ModsView({
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState<SortIndex>("downloads");
-  const [projectType, setProjectType] = useState<ProjectType>("mod");
-  const [loaderFilter, setLoaderFilter] = useState<ModLoader | "all">(
-    loader === "vanilla" ? "all" : loader
+  const availableTypes = contentTypesForLoader(loader);
+  const [projectType, setProjectType] = useState<ProjectType>(
+    () => contentTypesForLoader(loader)[0]
   );
   const [results, setResults] = useState<ModHit[]>([]);
   const [totalHits, setTotalHits] = useState(0);
@@ -79,13 +76,18 @@ export default function ModsView({
   );
 
   async function runSearch(q?: string, p?: number) {
+    if (!availableTypes.includes(projectType)) {
+      setResults([]);
+      setTotalHits(0);
+      return;
+    }
     setLoading(true);
     setError(null);
     const offset = (p ?? page) * LIMIT;
     try {
       const data = await searchMods({
         query: q ?? query,
-        loader: loaderFilter === "all" ? undefined : loaderFilter,
+        loader,
         version: gameVersion as any,
         index,
         projectType,
@@ -116,11 +118,16 @@ export default function ModsView({
   }
 
   useEffect(() => {
+    const types = contentTypesForLoader(loader);
+    if (!types.includes(projectType)) {
+      setProjectType(types[0]);
+      return;
+    }
     setPage(0);
     const t = setTimeout(() => runSearch(undefined, 0), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, index, loaderFilter, gameVersion, projectType]);
+  }, [query, index, loader, gameVersion, projectType]);
 
   async function handleInstall(hit: ModHit) {
     setInstalling((s) => new Set(s).add(hit.project_id));
@@ -143,16 +150,18 @@ export default function ModsView({
       <div className="mb-1 flex items-baseline justify-between">
         <h2 className="text-lg font-semibold text-white">Контент Modrinth</h2>
         <span className="text-xs text-white/35">
-          {gameVersion} · профиль {activeProfile}
+          {gameVersion} · {loaderLabel(loader)} · профиль {activeProfile}
         </span>
       </div>
       <p className="mb-4 text-sm text-white/40">
-        Устанавливается напрямую в папку профиля и работает в игре
+        {loader === "vanilla"
+          ? "На Vanilla моды не ставятся — только ресурспаки и датапаки, как на Modrinth"
+          : `Каталог только для ${loaderLabel(loader)} · ставится в папку профиля`}
       </p>
 
       {/* Project type tabs */}
       <div className="mb-4 flex gap-1.5">
-      {PROJECT_TYPES.map((pt) => (
+      {availableTypes.map((pt) => (
         <button
           key={pt}
           onClick={() => setProjectType(pt)}
@@ -193,26 +202,9 @@ export default function ModsView({
       </div>
 
       <div className="mb-5 flex items-center justify-between">
-        {/* Loader filter (only for mods) */}
-        {projectType === "mod" ? (
-          <div className="flex gap-1.5">
-            {LOADER_FILTERS.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => setLoaderFilter(l.id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                  loaderFilter === l.id
-                    ? `${accent.bgSolid} text-[#06070a]`
-                    : "bg-white/[0.04] text-white/45 hover:bg-white/[0.08]"
-                }`}
-              >
-                {l.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div />
-        )}
+        <div className={`rounded-full px-3 py-1 text-xs font-medium ${accent.bg} ${accent.text}`}>
+          {loader === "vanilla" ? "Vanilla" : `Только ${loaderLabel(loader)}`}
+        </div>
 
         <div className="flex rounded-lg bg-white/[0.04] p-0.5 text-xs font-medium">
           <button

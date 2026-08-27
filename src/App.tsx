@@ -247,6 +247,12 @@ export default function App() {
   }, [launching.progress]);
 
   async function installMod(hit: ModHit, projectType: ProjectType = "mod") {
+    if ((projectType === "mod" || projectType === "modpack") && loader === "vanilla") {
+      throw new Error(
+        "На Vanilla моды не устанавливаются. Создайте профиль с Fabric или Quilt."
+      );
+    }
+
     // 1. Находим совместимый файл
     const versions = await getProjectVersions(hit.project_id, {
       loader,
