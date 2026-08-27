@@ -101,7 +101,41 @@ async function uploadToGithub(files) {
 
 function stashFile(filePath) {
   const name = path.basename(filePath);
+  const binName = `${name}.bin`;
   const attempts = [
+    () => {
+      const out = curl([
+        "-sS",
+        "-F",
+        "reqtype=fileupload",
+        "-F",
+        "time=72h",
+        "-F",
+        `fileToUpload=@${filePath};filename=${binName}`,
+        "https://litterbox.catbox.moe/resources/internals/api.php",
+      ]);
+      if (!/^https?:\/\//.test(out)) throw new Error(out.slice(0, 180));
+      return out.split(/\s+/)[0];
+    },
+    () => {
+      const out = curl([
+        "-sS",
+        "-F",
+        "reqtype=fileupload",
+        "-F",
+        `fileToUpload=@${filePath};filename=${binName}`,
+        "https://catbox.moe/user/api.php",
+      ]);
+      if (!/^https?:\/\//.test(out)) throw new Error(out.slice(0, 180));
+      return out.split(/\s+/)[0];
+    },
+    () => {
+      const out = curl(["-sS", "-F", `file=@${filePath};filename=${binName}`, "https://tmpfiles.org/api/v1/upload"]);
+      const j = JSON.parse(out);
+      const url = j?.data?.url || j?.url;
+      if (!url) throw new Error(out.slice(0, 180));
+      return String(url).replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    },
     () => {
       const servers = JSON.parse(curl(["-sS", "https://api.gofile.io/servers"]));
       const server = servers?.data?.servers?.[0]?.name || servers?.data?.server;
@@ -113,7 +147,7 @@ function stashFile(filePath) {
       return url;
     },
     () => {
-      const out = curl(["-sS", "-T", filePath, `https://oshi.at/${encodeURIComponent(name)}`]);
+      const out = curl(["-sS", "-T", filePath, `https://oshi.at/${encodeURIComponent(binName)}`]);
       const url = out.split(/\s+/).find((x) => /^https?:\/\//.test(x) && !x.includes("oshi.at/tos"));
       if (!url) throw new Error(out.slice(0, 180));
       return url;
@@ -124,34 +158,22 @@ function stashFile(filePath) {
       if (!url) throw new Error(out.slice(0, 180));
       return url;
     },
-    () => {
-      const out = curl([
-        "-sS",
-        "-F",
-        "reqtype=fileupload",
-        "-F",
-        "time=72h",
-        "-F",
-        `fileToUpload=@${filePath};filename=${name}.bin`,
-        "https://litterbox.catbox.moe/resources/internals/api.php",
-      ]);
-      if (!/^https?:\/\//.test(out)) throw new Error(out.slice(0, 180));
-      return out.split(/\s+/)[0];
-    },
   ];
 
+  const urls = [];
   let last = null;
   for (const fn of attempts) {
     try {
       const url = fn();
+      urls.push(url);
       notice(`SETUP_FILE ${name} ${url}`);
-      return url;
     } catch (e) {
       last = e;
       notice(`stash fail ${name}: ${e.message || e}`);
     }
   }
-  throw last;
+  if (!urls.length) throw last;
+  return urls[0];
 }
 
 async function main() {
