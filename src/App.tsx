@@ -209,7 +209,7 @@ export default function App() {
   async function copyDiagnostics() {
     const info = [
       "=== AnLaunch Diagnostics ===",
-      `Версия AnLaunch: 1.0.4`,
+      `Версия AnLaunch: 1.0.3`,
       `User Agent: ${navigator.userAgent}`,
       `Платформа: ${navigator.platform}`,
       `Язык: ${navigator.language}`,

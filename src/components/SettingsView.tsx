@@ -115,7 +115,7 @@ export default function SettingsView({
   const [autoStart, setAutoStart] = useState(false);
   const [sysMem, setSysMem] = useState<{ totalGB: number; freeGB: number; cpus: number } | null>(null);
 
-  const [appVersion, setAppVersion] = useState("1.0.4");
+  const [appVersion, setAppVersion] = useState("1.0.3");
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "ready" | "error">("idle");
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
