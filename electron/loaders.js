@@ -315,6 +315,36 @@ function resolveLibraryJar(librariesDir, lib) {
   return null;
 }
 
+function jarHasClass(jarPath, className) {
+  const entry = String(className).replace(/\./g, "/") + ".class";
+  try {
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip(jarPath);
+    return !!zip.getEntry(entry);
+  } catch {
+    return false;
+  }
+}
+
+function isFmlTweakerJar(jarPath) {
+  return (
+    jarHasClass(jarPath, "net.minecraftforge.fml.common.launcher.FMLTweaker") ||
+    jarHasClass(jarPath, "cpw.mods.fml.common.launcher.FMLTweaker")
+  );
+}
+
+function isLibrariesForgeJar(jarPath) {
+  const n = String(jarPath).replace(/\\/g, "/").toLowerCase();
+  if (n.includes("/versions/")) return false;
+  if (/installer/i.test(n)) return false;
+  return (
+    n.includes("/net/minecraftforge/forge/") ||
+    n.includes("/net/minecraftforge/fml/") ||
+    n.includes("/cpw/mods/fml/") ||
+    /\/forge-[^/]*universal\.jar$/i.test(n)
+  );
+}
+
 function findForgeJars(librariesDir) {
   const out = [];
   const roots = [
@@ -923,9 +953,50 @@ async function installLoader(loaderType, mcVersion, sharedDir, javaPath, onProgr
   }
 }
 
+function ensureLegacyForgeClasspath(sharedDir, classpath, log) {
+  const librariesDir = path.join(sharedDir, "libraries");
+  aliasUniversalJars(librariesDir, log);
+
+  const add = (jar) => {
+    if (!jar || classpath.includes(jar)) return;
+    classpath.push(jar);
+    if (log) log(`Добавляю Forge jar: ${path.basename(jar)}`);
+  };
+
+  for (const jar of findForgeJars(librariesDir)) add(jar);
+
+  let tweaker = classpath.find(isFmlTweakerJar);
+  if (tweaker) {
+    if (log) log(`FMLTweaker в ${path.basename(tweaker)}`);
+    return tweaker;
+  }
+
+  const instDir = path.join(sharedDir, "installers");
+  let installerFiles = [];
+  try {
+    installerFiles = fs.readdirSync(instDir).filter((f) => /forge/i.test(f) && /\.jar$/i.test(f));
+  } catch {}
+  for (const file of installerFiles) {
+    if (log) log(`Достаю Forge jar из ${file}…`);
+    extractInstallerMaven(path.join(instDir, file), librariesDir, log);
+  }
+  aliasUniversalJars(librariesDir, log);
+  for (const jar of findForgeJars(librariesDir)) add(jar);
+
+  tweaker = classpath.find(isFmlTweakerJar);
+  if (tweaker) {
+    if (log) log(`FMLTweaker в ${path.basename(tweaker)}`);
+    return tweaker;
+  }
+  return null;
+}
+
 module.exports = {
   installLoader,
   resolveLibraryJar,
   findForgeJars,
   aliasUniversalJars,
+  ensureLegacyForgeClasspath,
+  isFmlTweakerJar,
+  isLibrariesForgeJar,
 };

@@ -444,8 +444,8 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   const libraries = details.libraries || [];
   const downloadQueue = []; // { url, path, isNative, libName }
   const nativeFiles = []; // для последующего извлечения
-  const { resolveLibraryJar, findForgeJars, aliasUniversalJars } = require("./loaders");
-  aliasUniversalJars(librariesDir, log);
+  const { resolveLibraryJar, aliasUniversalJars, ensureLegacyForgeClasspath } = require("./loaders");
+  if (typeof aliasUniversalJars === "function") aliasUniversalJars(librariesDir, log);
 
   for (const lib of libraries) {
     if (!isLibraryAllowed(lib)) continue;
