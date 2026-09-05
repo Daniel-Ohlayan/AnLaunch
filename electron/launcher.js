@@ -248,6 +248,12 @@ async function loadVersionDetails(versionId, versionsDir, log) {
       if (!details.downloads && parent.downloads) {
         details.downloads = parent.downloads;
       }
+      if (!details.javaVersion && parent.javaVersion) {
+        details.javaVersion = parent.javaVersion;
+      }
+      if (!details.logging && parent.logging) {
+        details.logging = parent.logging;
+      }
     }
     return details;
   }
@@ -334,8 +340,9 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   let requiredExactVersion = 0;
 
   try {
-    const { findAllJavaInstalls, getRequiredJavaVersion, pickJavaForVersion, findJavaByVersion, getJavaMajorVersion } = require("./javaFinder");
+    const { findAllJavaInstalls, getRequiredJavaVersion, pickJavaForVersion, findJavaByVersion, getJavaMajorVersion, maxJavaForGame } = require("./javaFinder");
     const requiredJava = getRequiredJavaVersion(details);
+    const maxJava = maxJavaForGame(loader, version, requiredJava);
     const installs = findAllJavaInstalls();
 
     // Forge < 1.17 (LaunchWrapper) ТРЕБУЕТ Java 8 — на Java 9+ падает
@@ -353,6 +360,11 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
       }
       if (!isLegacyForge && manualVersion < requiredJava) {
         throw new Error(`Minecraft ${version} требует Java ${requiredJava}+, а в настройках выбрана Java ${manualVersion}.`);
+      }
+      if (!isLegacyForge && maxJava < 99 && manualVersion > maxJava) {
+        throw new Error(
+          `${loader} ${version} не запускается на Java ${manualVersion}. Нужна Java ${requiredJava}–${maxJava}.`
+        );
       }
     } else if (isLegacyForge) {
       mustUseExactJava = true;
@@ -631,6 +643,28 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     gameArgs = legacy.split(" ").filter(Boolean).map((a) => substitute(a, vars));
   }
 
+  // Forge/NeoForge кладут bootstrap/securejarhandler в -p (module-path).
+  // Если те же jar ещё и в -cp, Java падает в BootstrapLauncher.
+  const moduleJars = new Set();
+  for (let i = 0; i < jvmArgs.length; i++) {
+    if (jvmArgs[i] === "-p" || jvmArgs[i] === "--module-path") {
+      const val = String(jvmArgs[i + 1] || "");
+      for (const p of val.split(sep)) {
+        const n = path.normalize(p).toLowerCase();
+        if (n) moduleJars.add(n);
+      }
+    }
+  }
+  if (moduleJars.size) {
+    const filtered = classpath.filter((c) => !moduleJars.has(path.normalize(c).toLowerCase()));
+    if (filtered.length !== classpath.length) {
+      log(`Убрал ${classpath.length - filtered.length} jar с classpath (уже в module-path)`);
+      classpath.length = 0;
+      classpath.push(...filtered);
+      vars.classpath = classpath.join(sep);
+    }
+  }
+
   const minRam = Math.max(1, Math.min(Number(config.ramMin) || Math.min(ram, 2), ram));
   const memoryArgs = [
     `-Xmx${ram}G`,
@@ -644,9 +678,30 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   // запуск на старых JDK (17, 21) ошибками "Unrecognized option".
   jvmArgs = filterIncompatibleJvmArgs(jvmArgs, detectedJava, log);
 
-  const hasCP = jvmArgs.includes("-cp") || jvmArgs.includes("-classpath");
+  if (detectedJava >= 24) {
+    const extra24 = [
+      "--sun-misc-unsafe-memory-access=allow",
+      "--enable-native-access=ALL-UNNAMED",
+    ];
+    for (const flag of extra24) {
+      const key = flag.split("=")[0];
+      if (!jvmArgs.some((a) => String(a).startsWith(key))) {
+        jvmArgs.unshift(flag);
+        log(`Java ${detectedJava}: добавляю ${flag}`);
+      }
+    }
+  }
+
+  const finalCp = classpath.join(sep);
+  let hasCP = false;
+  for (let i = 0; i < jvmArgs.length; i++) {
+    if (jvmArgs[i] === "-cp" || jvmArgs[i] === "-classpath") {
+      jvmArgs[i + 1] = finalCp;
+      hasCP = true;
+    }
+  }
   if (!hasCP) {
-    jvmArgs.push("-cp", cpString);
+    jvmArgs.push("-cp", finalCp);
   }
 
   // Пользовательские JVM-аргументы из настроек — добавляются до mainClass

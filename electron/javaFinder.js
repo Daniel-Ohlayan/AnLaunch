@@ -144,21 +144,39 @@ function findJavaByVersion(installs, majorVersion) {
 
 // Выбирает лучший установленный java-бинарник для требуемой версии.
 // Предпочитает точное совпадение или более новую версию, если точной нет.
-function pickJavaForVersion(installs, requiredMajor) {
+function pickJavaForVersion(installs, requiredMajor, maxMajor) {
   if (installs.length === 0) return null;
+  const max = maxMajor == null ? 99 : maxMajor;
 
-  const exact = installs.filter((i) => i.version === requiredMajor);
-  if (exact.length > 0) return exact[0];
+  const inRange = installs.filter((i) => i.version >= requiredMajor && i.version <= max);
+  if (inRange.length > 0) {
+    const exact = inRange.filter((i) => i.version === requiredMajor);
+    if (exact.length > 0) return exact[0];
+    return [...inRange].sort((a, b) => a.version - b.version)[0];
+  }
 
   const newerOrEqual = installs
     .filter((i) => i.version >= requiredMajor)
-    .sort((a, b) => a.version - b.version); // берём минимально достаточную новую версию
+    .sort((a, b) => a.version - b.version);
   if (newerOrEqual.length > 0) return newerOrEqual[0];
 
-  // Если совместимой нет, возвращаем самую новую из того что есть — лучше понятная
-  // ошибка запуска Java, чем полное отсутствие попытки.
   const sorted = [...installs].sort((a, b) => b.version - a.version);
   return sorted[0];
+}
+
+// Forge/NeoForge 1.18–1.20.4 рассчитаны на Java 17 (до 21). Java 24/25 их ломает
+// (sun.misc.Unsafe в securejarhandler / BootstrapLauncher).
+function maxJavaForGame(loader, mcVersion, requiredMajor) {
+  const ver = String(mcVersion || "");
+  if (loader === "forge" || loader === "neoforge") {
+    if (requiredMajor <= 8) return 8;
+    if (/^26(\.|$)/.test(ver) || requiredMajor >= 25) return 99;
+    if (requiredMajor <= 17) return 21;
+    if (requiredMajor <= 21) return 21;
+  }
+  if (/^26(\.|$)/.test(ver) || requiredMajor >= 25) return 99;
+  if (requiredMajor <= 17) return 21;
+  return 99;
 }
 
 module.exports = {
