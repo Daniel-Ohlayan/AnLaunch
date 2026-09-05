@@ -185,4 +185,5 @@ module.exports = {
   getRequiredJavaVersion,
   pickJavaForVersion,
   findJavaByVersion,
+  maxJavaForGame,
 };
