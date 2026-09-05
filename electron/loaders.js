@@ -192,9 +192,152 @@ function extractInstallerMaven(installerPath, librariesDir, log) {
       n++;
     }
     if (n) log(`Из installer извлечено ${n} maven-файлов`);
+    extractInstallerForgeJars(zip, librariesDir, log);
+    aliasUniversalJars(librariesDir, log);
   } catch (e) {
     log(`Не удалось извлечь maven из installer: ${e.message}`);
   }
+}
+
+// Старый Forge кладёт universal.jar в корень installer и в maven/,
+// а version.json ждёт forge-<ver>.jar без классификатора.
+function extractInstallerForgeJars(zip, librariesDir, log) {
+  let installCoord = null;
+  let filePath = null;
+  try {
+    const pe = zip.getEntry("install_profile.json");
+    if (pe) {
+      const profile = JSON.parse(pe.getData().toString("utf8"));
+      installCoord = profile.install && profile.install.path;
+      filePath = profile.install && profile.install.filePath;
+    }
+  } catch {}
+  const destDir = (() => {
+    if (!installCoord) return path.join(librariesDir, "net", "minecraftforge", "forge");
+    const m = mavenPath(installCoord);
+    if (!m) return path.join(librariesDir, "net", "minecraftforge", "forge");
+    return path.dirname(path.join(librariesDir, m.path));
+  })();
+  ensureDir(destDir);
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const rel = entry.entryName.replace(/\\/g, "/");
+    const base = path.basename(rel);
+    if (!/\.jar$/i.test(base) || /installer/i.test(base)) continue;
+    const isRootForge =
+      rel === filePath ||
+      (!rel.includes("/") && /forge/i.test(base)) ||
+      (/^forge-/i.test(base) && /universal|client/i.test(base) && !rel.startsWith("maven/"));
+    if (!isRootForge) continue;
+    const dest = path.join(destDir, base);
+    if (!fs.existsSync(dest)) {
+      fs.writeFileSync(dest, entry.getData());
+      log(`Из installer: ${base}`);
+    }
+  }
+  if (installCoord) {
+    const expected = path.join(librariesDir, mavenPath(installCoord).path);
+    if (!fs.existsSync(expected)) {
+      const uni = path.join(destDir, path.basename(expected).replace(/\.jar$/i, "-universal.jar"));
+      const any = fs.existsSync(uni)
+        ? uni
+        : (fs.readdirSync(destDir).filter((f) => /\.jar$/i.test(f) && !/installer/i.test(f))[0]
+            ? path.join(destDir, fs.readdirSync(destDir).filter((f) => /\.jar$/i.test(f) && !/installer/i.test(f))[0])
+            : null);
+      if (any && any !== expected) {
+        fs.copyFileSync(any, expected);
+        log(`Forge jar: ${path.basename(any)} → ${path.basename(expected)}`);
+      }
+    }
+  }
+}
+
+function aliasUniversalJars(librariesDir, log) {
+  const roots = [
+    path.join(librariesDir, "net", "minecraftforge"),
+    path.join(librariesDir, "cpw", "mods"),
+  ];
+  function walk(dir, depth) {
+    if (depth < 0) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, depth - 1);
+      else if (/-universal\.jar$/i.test(e.name)) {
+        const alias = full.replace(/-universal\.jar$/i, ".jar");
+        if (!fs.existsSync(alias)) {
+          try {
+            fs.copyFileSync(full, alias);
+            if (log) log(`Forge: ${e.name} → ${path.basename(alias)}`);
+          } catch {}
+        }
+      }
+    }
+  }
+  for (const root of roots) walk(root, 5);
+}
+
+function resolveLibraryJar(librariesDir, lib) {
+  const tried = [];
+  const art = lib && lib.downloads && lib.downloads.artifact;
+  if (art && art.path) tried.push(path.join(librariesDir, art.path));
+  if (lib && lib.name) {
+    const m = mavenPath(lib.name);
+    if (m) tried.push(path.join(librariesDir, m.path));
+    const parts = String(lib.name).split(":");
+    if (parts.length >= 3) {
+      const [group, artifact, ver, classifier] = parts;
+      const dir = path.join(librariesDir, group.replace(/\./g, "/"), artifact, ver);
+      const extra = classifier ? [classifier] : ["universal", "client", "slim"];
+      for (const cl of extra) {
+        tried.push(path.join(dir, `${artifact}-${ver}-${cl}.jar`));
+      }
+      try {
+        const jars = fs
+          .readdirSync(dir)
+          .filter((f) => /\.jar$/i.test(f) && !/installer/i.test(f));
+        const preferred =
+          jars.find((f) => /universal/i.test(f)) ||
+          jars.find((f) => f === `${artifact}-${ver}.jar`) ||
+          jars[0];
+        if (preferred) tried.push(path.join(dir, preferred));
+      } catch {}
+    }
+  }
+  for (const p of tried) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function findForgeJars(librariesDir) {
+  const out = [];
+  const roots = [
+    path.join(librariesDir, "net", "minecraftforge", "forge"),
+    path.join(librariesDir, "net", "minecraftforge", "fml"),
+    path.join(librariesDir, "cpw", "mods", "fml"),
+  ];
+  function walk(dir, depth) {
+    if (depth < 0) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, depth - 1);
+      else if (/\.jar$/i.test(e.name) && !/installer/i.test(e.name)) out.push(full);
+    }
+  }
+  for (const root of roots) walk(root, 4);
+  return out;
 }
 
 function spawnInstaller(javaBin, args, cwd, log) {
@@ -666,14 +809,26 @@ function profileLooksComplete(root, id) {
     const data = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
     if (!data.mainClass) return false;
     const librariesDir = path.join(root, "libraries");
+    aliasUniversalJars(librariesDir, null);
     const libs = data.libraries || [];
+    const needsFml =
+      /FMLTweaker/i.test(data.minecraftArguments || "") ||
+      /launchwrapper/i.test(String(data.mainClass || "")) ||
+      libs.some((l) => /minecraftforge:forge|:fml:/i.test(l.name || ""));
+    if (needsFml) {
+      const forgeLib = libs.find((l) => /minecraftforge:forge|:fml:/i.test(l.name || ""));
+      if (forgeLib && !resolveLibraryJar(librariesDir, forgeLib) && findForgeJars(librariesDir).length === 0) {
+        return false;
+      }
+      if (!forgeLib && findForgeJars(librariesDir).length === 0) return false;
+    }
     let missing = 0;
     let checked = 0;
     for (const lib of libs) {
       const p = lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path;
       if (!p) continue;
       checked++;
-      if (!fs.existsSync(path.join(librariesDir, p))) missing++;
+      if (!resolveLibraryJar(librariesDir, lib)) missing++;
     }
     if (checked > 8 && missing > checked * 0.35) return false;
     return true;
@@ -711,6 +866,16 @@ async function installWithInstaller(kind, spec, mcVersion, sharedDir, javaPath, 
     ensureDir(dir);
     fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(versionData, null, 2));
     await downloadVersionLibraries(versionData, librariesDir, log);
+    aliasUniversalJars(librariesDir, log);
+    const forgeLib = (versionData.libraries || []).find((l) => /minecraftforge:forge|:fml:/i.test(l.name || ""));
+    if (forgeLib && !resolveLibraryJar(librariesDir, forgeLib)) {
+      const found = findForgeJars(librariesDir);
+      if (found.length) {
+        log(`Forge jar найден: ${found.map((f) => path.basename(f)).join(", ")}`);
+      } else {
+        throw new Error("В installer нет forge-universal.jar — FMLTweaker не запустится.");
+      }
+    }
     log(`${kind} ${id} установлен ✓`);
     return { id };
   }

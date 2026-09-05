@@ -444,15 +444,18 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   const libraries = details.libraries || [];
   const downloadQueue = []; // { url, path, isNative, libName }
   const nativeFiles = []; // для последующего извлечения
+  const { resolveLibraryJar, findForgeJars, aliasUniversalJars } = require("./loaders");
+  aliasUniversalJars(librariesDir, log);
 
   for (const lib of libraries) {
     if (!isLibraryAllowed(lib)) continue;
 
-    if (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path) {
+    const resolved = resolveLibraryJar(librariesDir, lib);
+    if (resolved) {
+      classpath.push(resolved);
+    } else if (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path) {
       const libPath = path.join(librariesDir, lib.downloads.artifact.path);
-      if (fs.existsSync(libPath)) {
-        classpath.push(libPath);
-      } else if (lib.downloads.artifact.url) {
+      if (lib.downloads.artifact.url) {
         downloadQueue.push({ url: lib.downloads.artifact.url, path: libPath, libName: lib.name, type: "lib" });
       } else if (lib.name) {
         const m = mavenCoordPath(lib.name);
@@ -553,6 +556,35 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   });
   classpath.length = 0;
   classpath.push(...dedupedCp);
+
+  const needsFml =
+    /FMLTweaker/i.test(details.minecraftArguments || "") ||
+    /launchwrapper/i.test(String(details.mainClass || ""));
+  if (needsFml) {
+    const hasForgeJar = classpath.some((c) => {
+      const b = path.basename(c).toLowerCase();
+      return /forge/i.test(b) && !/installer/i.test(b) && !/launchwrapper/i.test(b);
+    });
+    if (!hasForgeJar) {
+      const extra = findForgeJars(librariesDir);
+      for (const jar of extra) {
+        if (!classpath.includes(jar)) {
+          classpath.push(jar);
+          log(`Добавляю Forge jar: ${path.basename(jar)}`);
+        }
+      }
+    }
+    const stillMissing = !classpath.some((c) => {
+      const b = path.basename(c).toLowerCase();
+      return /forge/i.test(b) && !/installer/i.test(b) && !/launchwrapper/i.test(b);
+    });
+    if (stillMissing) {
+      throw new Error(
+        "Не найден forge-*-universal.jar (класс FMLTweaker). " +
+          "Удалите папку versions в каталоге AnLaunch и запустите снова — Forge переустановится."
+      );
+    }
+  }
 
   // 4. Ассеты
   log("Загрузка ассетов…");
