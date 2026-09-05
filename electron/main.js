@@ -119,6 +119,7 @@ function broadcastLog(entry) {
 
 function createLogsWindow() {
   if (logsWindow && !logsWindow.isDestroyed()) {
+    logsWindow.show();
     logsWindow.focus();
     return logsWindow;
   }
@@ -132,20 +133,32 @@ function createLogsWindow() {
     icon,
     backgroundColor: "#0a0a0f",
     frame: true,
+    show: true,
     autoHideMenuBar: true,
-    parent: mainWindow || undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      additionalArguments: ["--is-logs-window"],
+      additionalArguments: ["anlaunch-role=logs"],
     },
   });
   if (icon) logsWindow.setIcon(icon);
   logsWindow.setMenuBarVisibility(false);
-  logsWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
-    query: { logs: "1" },
+  logsWindow.webContents.on("did-fail-load", (_e, code, desc) => {
+    appendLog("error", `Окно логов не загрузилось: ${code} ${desc}`);
+  });
+  const html = path.join(__dirname, "../dist/index.html");
+  if (isDev) {
+    logsWindow.loadURL("http://localhost:5173/#logs");
+  } else {
+    logsWindow.loadFile(html, { hash: "logs", query: { logs: "1" } }).catch((err) => {
+      appendLog("error", `Не удалось открыть окно логов: ${err.message}`);
+    });
+  }
+  logsWindow.once("ready-to-show", () => {
+    logsWindow.show();
+    logsWindow.focus();
   });
   logsWindow.on("closed", () => {
     logsWindow = null;
@@ -258,8 +271,14 @@ ipcMain.handle("save-file", async (_event, { defaultName, buffer }) => {
 
 // Открыть отдельное окно логов (как в Lunar Client)
 ipcMain.handle("open-logs-window", () => {
-  createLogsWindow();
-  return { success: true };
+  try {
+    const win = createLogsWindow();
+    if (win) win._isLogsWindow = true;
+    return { success: true };
+  } catch (err) {
+    appendLog("error", `Окно логов: ${err.message}`);
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle("get-logs", () => {

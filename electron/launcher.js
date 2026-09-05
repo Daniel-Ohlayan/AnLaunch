@@ -389,12 +389,13 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
         );
       }
     } else {
-      log(`Minecraft ${version} требует Java ${requiredJava}+`);
+      const capLabel = maxJava < 99 ? `–${maxJava}` : "+";
+      log(`Minecraft ${version} требует Java ${requiredJava}${capLabel}`);
       if (installs.length > 0) {
         log(`Найдено Java: ${installs.map((i) => `v${i.version}`).join(", ")}`);
       }
-      const best = pickJavaForVersion(installs, requiredJava);
-      if (best && best.version >= requiredJava) {
+      const best = pickJavaForVersion(installs, requiredJava, maxJava);
+      if (best && best.version >= requiredJava && best.version <= maxJava) {
         javaBin = best.path;
         detectedJava = best.version;
         log(`Использую Java ${best.version}: ${best.path}`);
@@ -403,7 +404,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
           ? installs.map((i) => `Java ${i.version}`).join(", ")
           : "не найдена";
         throw new Error(
-          `Minecraft ${version} требует Java ${requiredJava}+, сейчас: ${have}.\n` +
+          `${loader === "vanilla" ? "Minecraft" : loader} ${version} требует Java ${requiredJava}${capLabel}, сейчас: ${have}.\n` +
             `Скачайте Adoptium Temurin ${requiredJava}: https://adoptium.net/temurin/releases/?version=${requiredJava}`
         );
       }
@@ -447,12 +448,18 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   for (const lib of libraries) {
     if (!isLibraryAllowed(lib)) continue;
 
-    if (lib.downloads && lib.downloads.artifact) {
+    if (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path) {
       const libPath = path.join(librariesDir, lib.downloads.artifact.path);
       if (fs.existsSync(libPath)) {
         classpath.push(libPath);
-      } else {
+      } else if (lib.downloads.artifact.url) {
         downloadQueue.push({ url: lib.downloads.artifact.url, path: libPath, libName: lib.name, type: "lib" });
+      } else if (lib.name) {
+        const m = mavenCoordPath(lib.name);
+        if (m) {
+          const alt = path.join(librariesDir, m);
+          if (fs.existsSync(alt)) classpath.push(alt);
+        }
       }
     } else if (lib.url && lib.name) {
       const parts = lib.name.split(":");
@@ -518,7 +525,24 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     extractNatives(nativePath, nativesDir);
   }
 
-  if (fs.existsSync(clientJarPath)) classpath.push(clientJarPath);
+  // Forge/NeoForge: в classpath должен быть versions/<id>/<id>.jar
+  // (его имя есть в -DignoreList=${version_name}.jar). Сырой vanilla
+  // 1.20.1.jar туда не входит — BootstrapLauncher тогда падает с кодом 1.
+  const versionJarPath = path.join(finalVersionsDir, `${actualVersion}.jar`);
+  if (loader !== "vanilla") {
+    if (!fs.existsSync(versionJarPath) && fs.existsSync(clientJarPath)) {
+      try {
+        fs.copyFileSync(clientJarPath, versionJarPath);
+        log(`Скопирован client.jar → ${path.basename(versionJarPath)}`);
+      } catch (e) {
+        log(`Не удалось скопировать client.jar: ${e.message}`);
+      }
+    }
+    if (fs.existsSync(versionJarPath)) classpath.push(versionJarPath);
+    else if (fs.existsSync(clientJarPath)) classpath.push(clientJarPath);
+  } else if (fs.existsSync(clientJarPath)) {
+    classpath.push(clientJarPath);
+  }
 
   // Убираем дубликаты
   const seenCp = new Set();
@@ -647,12 +671,17 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   // Если те же jar ещё и в -cp, Java падает в BootstrapLauncher.
   const moduleJars = new Set();
   for (let i = 0; i < jvmArgs.length; i++) {
-    if (jvmArgs[i] === "-p" || jvmArgs[i] === "--module-path") {
-      const val = String(jvmArgs[i + 1] || "");
-      for (const p of val.split(sep)) {
-        const n = path.normalize(p).toLowerCase();
-        if (n) moduleJars.add(n);
-      }
+    const tok = String(jvmArgs[i]);
+    let val = "";
+    if (tok === "-p" || tok === "--module-path") {
+      val = String(jvmArgs[i + 1] || "");
+    } else if (tok.startsWith("--module-path=")) {
+      val = tok.slice("--module-path=".length);
+    }
+    if (!val) continue;
+    for (const p of val.split(sep)) {
+      const n = path.normalize(p).toLowerCase();
+      if (n) moduleJars.add(n);
     }
   }
   if (moduleJars.size) {
@@ -670,8 +699,14 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     `-Xmx${ram}G`,
     `-Xms${minRam}G`,
     "-XX:+UseG1GC",
-    "-Dorg.lwjgl.librarypath=" + nativesDir,
   ];
+  let nativeBins = [];
+  try {
+    nativeBins = fs.readdirSync(nativesDir).filter((f) => /\.(dll|so|dylib|jnilib)$/i.test(f));
+  } catch {}
+  if (nativeBins.length) {
+    memoryArgs.push("-Dorg.lwjgl.librarypath=" + nativesDir);
+  }
 
   // Фильтруем JVM-аргументы, несовместимые с установленной Java.
   // Mojang в новых version.json добавляет флаги для Java 22-24, которые ломают
@@ -693,16 +728,16 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   }
 
   const finalCp = classpath.join(sep);
-  let hasCP = false;
-  for (let i = 0; i < jvmArgs.length; i++) {
-    if (jvmArgs[i] === "-cp" || jvmArgs[i] === "-classpath") {
-      jvmArgs[i + 1] = finalCp;
-      hasCP = true;
-    }
-  }
+  applyClasspathToJvmArgs(jvmArgs, finalCp);
+  let hasCP = jvmArgs.some((a) => a === "-cp" || a === "-classpath");
   if (!hasCP) {
     jvmArgs.push("-cp", finalCp);
   }
+
+  const extraIgnore = [];
+  if (fs.existsSync(clientJarPath)) extraIgnore.push(path.basename(clientJarPath));
+  if (fs.existsSync(versionJarPath)) extraIgnore.push(path.basename(versionJarPath));
+  patchIgnoreList(jvmArgs, extraIgnore);
 
   // Пользовательские JVM-аргументы из настроек — добавляются до mainClass
   if (config.jvmArgs) {
@@ -746,9 +781,14 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   const allArgs = [...memoryArgs, ...jvmArgs, mainClass, ...gameArgs];
 
   // 6. Запуск
+  if (!mainClass) {
+    throw new Error(`В профиле ${actualVersion} нет mainClass — Forge/NeoForge установлен неполностью. Удалите папку versions и запустите снова.`);
+  }
+
   log(`Запуск Minecraft ${actualVersion}…`);
   log(`Main class: ${mainClass}`);
   log(`Java: ${javaBin}`);
+  log(`Classpath: ${classpath.length} jar`);
 
   const child = spawn(javaBin, allArgs, {
     cwd: gameDir,
@@ -763,7 +803,11 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   return new Promise((resolve) => {
     child.stdout.on("data", (d) => {
       const line = d.toString();
-      console.log("[MC]", line.trim());
+      const t = line.trim();
+      if (t) {
+        console.log("[MC]", t);
+        log(t.length > 600 ? `${t.slice(0, 600)}…` : t);
+      }
       if (
         !started &&
         (line.includes("Setting user") ||
@@ -787,9 +831,10 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     child.stderr.on("data", (d) => {
       const line = d.toString();
       errBuffer += line;
+      if (errBuffer.length > 80000) errBuffer = errBuffer.slice(-40000);
       console.error("[MC ERR]", line.trim());
       const t = line.trim();
-      if (t) log(t.length > 400 ? `${t.slice(0, 400)}…` : t);
+      if (t) log(t.length > 600 ? `${t.slice(0, 600)}…` : t);
     });
 
     child.on("error", (err) => {
@@ -797,41 +842,102 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     });
 
     child.on("exit", (code) => {
-      if (!started) {
-        if (code === 0) {
-          resolve({ success: true, message: "Minecraft закрыт." });
-        } else if (errBuffer.includes("UnsupportedClassVersionError")) {
-          const need = getRequiredJavaVersionSafe(details);
-          resolve({
-            success: false,
-            message:
-              `Установленная Java слишком старая для Minecraft ${actualVersion}.\n` +
-              `Нужна Java ${need}+ , а использовалась: ${javaBin}.\n` +
-              `Установите подходящую версию Java (например с adoptium.net) и повторите запуск.`,
-          });
-        } else {
-          const hint = errBuffer.slice(-400);
-          resolve({
-            success: false,
-            message: `Minecraft завершился с кодом ${code}.${hint ? "\n" + hint : ""}`,
-          });
-        }
+      if (started) return;
+      if (code === 0) {
+        resolve({ success: true, message: "Minecraft закрыт." });
+        return;
       }
-    });
-
-    setTimeout(() => {
-      if (!started && child.exitCode === null) {
-        started = true;
+      const crash = collectCrashText(gameDir);
+      if (errBuffer.includes("UnsupportedClassVersionError")) {
+        const need = getRequiredJavaVersionSafe(details);
         resolve({
-          success: true,
-          message: `✅ Minecraft ${actualVersion} запускается! Игрок: ${account.username}`,
+          success: false,
+          message:
+            `Установленная Java слишком старая для Minecraft ${actualVersion}.\n` +
+            `Нужна Java ${need}+, а использовалась: ${javaBin} (Java ${detectedJava}).\n` +
+            `Скачайте Temurin ${need}: https://adoptium.net/temurin/releases/?version=${need}`,
         });
+        return;
       }
-    }, 12000);
+      const caused = errBuffer.match(/Caused by:[^\n]+(?:\n\tat[^\n]+){0,8}/);
+      const hint = (caused && caused[0]) || errBuffer.slice(-1200);
+      resolve({
+        success: false,
+        message:
+          `Minecraft завершился с кодом ${code}. Java ${detectedJava}: ${javaBin}` +
+          (hint ? `\n${hint}` : "") +
+          (crash ? `\n${crash}` : ""),
+      });
+    });
   });
 }
 
+function readTail(file, maxChars) {
+  try {
+    if (!fs.existsSync(file)) return "";
+    return fs.readFileSync(file, "utf8").slice(-maxChars).trim();
+  } catch {
+    return "";
+  }
+}
+
+function collectCrashText(gameDir) {
+  const parts = [];
+  const latest = readTail(path.join(gameDir, "logs", "latest.log"), 2500);
+  if (latest) parts.push("--- logs/latest.log ---\n" + latest);
+  try {
+    const crashDir = path.join(gameDir, "crash-reports");
+    const files = fs
+      .readdirSync(crashDir)
+      .filter((f) => f.endsWith(".txt"))
+      .sort();
+    if (files.length) {
+      const name = files[files.length - 1];
+      const body = readTail(path.join(crashDir, name), 1800);
+      if (body) parts.push(`--- crash-reports/${name} ---\n` + body);
+    }
+  } catch {}
+  return parts.join("\n");
+}
+
 // Безопасно достаёт требуемую версию Java из details (не бросает исключений).
+function mavenCoordPath(name) {
+  const parts = String(name || "").split(":");
+  if (parts.length < 3) return null;
+  const [group, artifact, ver, classifier] = parts;
+  const fileName = classifier
+    ? `${artifact}-${ver}-${classifier}.jar`
+    : `${artifact}-${ver}.jar`;
+  return `${group.replace(/\./g, "/")}/${artifact}/${ver}/${fileName}`;
+}
+
+function applyClasspathToJvmArgs(jvmArgs, finalCp) {
+  for (let i = 0; i < jvmArgs.length; i++) {
+    const a = String(jvmArgs[i]);
+    if (a === "-cp" || a === "-classpath") {
+      jvmArgs[i + 1] = finalCp;
+    } else if (a.startsWith("-DlegacyClassPath=")) {
+      jvmArgs[i] = "-DlegacyClassPath=" + finalCp;
+    }
+  }
+}
+
+function patchIgnoreList(jvmArgs, extraNames) {
+  for (let i = 0; i < jvmArgs.length; i++) {
+    const a = String(jvmArgs[i]);
+    if (!a.startsWith("-DignoreList=")) continue;
+    const parts = a.slice("-DignoreList=".length).split(",").filter(Boolean);
+    const seen = new Set(parts.map((p) => p.toLowerCase()));
+    for (const name of extraNames) {
+      const n = String(name || "").trim();
+      if (!n || seen.has(n.toLowerCase())) continue;
+      parts.push(n);
+      seen.add(n.toLowerCase());
+    }
+    jvmArgs[i] = "-DignoreList=" + parts.join(",");
+  }
+}
+
 function getRequiredJavaVersionSafe(details) {
   try {
     const { getRequiredJavaVersion } = require("./javaFinder");

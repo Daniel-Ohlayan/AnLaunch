@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-const isLogs = process.argv.includes("--is-logs-window");
+const isLogs = process.argv.some((a) => String(a).includes("anlaunch-role=logs"));
 
 contextBridge.exposeInMainWorld("electronAPI", {
   isElectron: () => ipcRenderer.invoke("is-electron"),
