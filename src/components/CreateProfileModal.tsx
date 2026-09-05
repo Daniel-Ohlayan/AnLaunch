@@ -40,7 +40,7 @@ export default function CreateProfileModal({
     if (open) {
       setName("");
       setVersion(defaultVersion);
-      setLoader(defaultLoader === "forge" || defaultLoader === "neoforge" ? "fabric" : defaultLoader);
+      setLoader(defaultLoader);
       setDescription("");
       setAvatarUrl(null);
       setAccentColor(homeSettings.accentColor || "emerald");
@@ -114,9 +114,6 @@ export default function CreateProfileModal({
       return setError("Разрешены русские и латинские буквы, цифры, пробел, точка, _ и -");
     if (trimmed === "." || trimmed === ".." || /[. ]$/.test(trimmed))
       return setError("Имя не может заканчиваться точкой или пробелом");
-    if (loader === "forge" || loader === "neoforge")
-      return setError("Пока что этот загрузчик недоступен. Выберите Vanilla, Fabric или Quilt.");
-
     try {
       await onCreate({
         name: trimmed,
@@ -287,8 +284,8 @@ export default function CreateProfileModal({
                   { id: "vanilla" as ModLoader, label: "Vanilla", icon: "🎮", desc: "Чистая ванильная версия", available: true },
                   { id: "fabric" as ModLoader, label: "Fabric", icon: "🧩", desc: "Лёгкий и быстрый загрузчик модов", available: true },
                   { id: "quilt" as ModLoader, label: "Quilt", icon: "🔷", desc: "Форк Fabric", available: true },
-                  { id: "forge" as ModLoader, label: "Forge", icon: "⚙️", desc: "Пока что загрузчик недоступен — будет позже", available: false },
-                  { id: "neoforge" as ModLoader, label: "NeoForge", icon: "✨", desc: "Пока что загрузчик недоступен — будет позже", available: false },
+                  { id: "forge" as ModLoader, label: "Forge", icon: "⚙️", desc: "Классический загрузчик модов", available: true },
+                  { id: "neoforge" as ModLoader, label: "NeoForge", icon: "✨", desc: "Форк Forge для новых версий", available: true },
                 ]
               ).map((l) => (
                 <button

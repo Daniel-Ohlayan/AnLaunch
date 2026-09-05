@@ -309,34 +309,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
       }
     } catch (err) {
       log(`❌ Не удалось установить ${loader}: ${err.message}`);
-
-      // Fabric поддерживает только Minecraft 1.14 и новее — пробовать его
-      // для более старых версий бессмысленно, сервер Fabric вернёт HTTP 400.
-      const versionParts = version.split(".").map((n) => parseInt(n, 10));
-      const isFabricCompatible =
-        versionParts[0] > 1 || (versionParts[0] === 1 && versionParts[1] >= 14);
-
-      if (loader === "forge" && isFabricCompatible) {
-        log("⚡ Не удалось установить Forge. Автоматически переключаюсь на Fabric...");
-        try {
-          const { installLoader } = require("./loaders");
-          const r = await installLoader("fabric", version, sharedDir, javaPath, log);
-          if (r && r.id) {
-            actualVersion = r.id;
-            log(`✓ Fabric установлен (вместо Forge): ${actualVersion}`);
-          }
-        } catch (e2) {
-          log(`❌ Fabric тоже не установлен: ${e2.message}`);
-          log("Запускаю ванильную версию");
-        }
-      } else if (loader === "forge") {
-        // Для версий 1.7–1.13.x у Fabric нет поддержки — сразу предупреждаем
-        // и переходим на ванильную версию, не тратя время на заведомо
-        // провальную попытку установки Fabric.
-        log("ℹ Fabric не поддерживает эту версию Minecraft (нужна 1.14+).");
-        log("Для установки модов на эту версию используйте Forge вручную с Java 8, либо выберите версию 1.14 или новее.");
-        log("Запускаю ванильную версию");
-      } else if (loader === "fabric" || loader === "quilt") {
+      if (loader === "fabric" || loader === "quilt") {
         log(`ℹ ${loader} недоступен для ${version}. Запускаю ванильную версию.`);
         actualVersion = version;
       } else {
@@ -744,6 +717,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
           line.includes("OpenAL") ||
           line.includes("Loading mod") ||
           line.includes("Forge") ||
+          line.includes("NeoForge") ||
           line.includes("Fabric") ||
           line.includes("Applying"))
       ) {

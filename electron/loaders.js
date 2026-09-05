@@ -80,6 +80,181 @@ function downloadJSON(url, redirects = 0) {
   });
 }
 
+function downloadText(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error("Too many redirects"));
+    getProto(url)
+      .get(url, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return resolve(downloadText(res.headers.location, redirects + 1));
+        }
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve(data));
+      })
+      .on("error", reject);
+  });
+}
+
+function parseMavenVersions(xml) {
+  const versions = [];
+  const re = /<version>([^<]+)<\/version>/g;
+  let m;
+  while ((m = re.exec(xml))) versions.push(m[1].trim());
+  return versions;
+}
+
+function mcMinorParts(mcVersion) {
+  const parts = String(mcVersion).split(".").map((n) => parseInt(n, 10));
+  if (parts[0] === 1) return { major: 1, minor: parts[1] || 0, patch: parts[2] || 0 };
+  return { major: parts[0] || 0, minor: parts[1] || 0, patch: parts[2] || 0 };
+}
+
+function isLegacyForgeMc(mcVersion) {
+  const p = mcMinorParts(mcVersion);
+  return p.major === 1 && p.minor < 13;
+}
+
+function javaMajorForMc(mcVersion) {
+  if (/^26(\.|$)/.test(mcVersion)) return 25;
+  const p = mcMinorParts(mcVersion);
+  const minor = p.major === 1 ? p.minor : p.major;
+  if (minor >= 21) return 21;
+  if (minor >= 18) return 17;
+  if (minor === 17) return 16;
+  return 8;
+}
+
+function pickInstallerJava(javaPath, mcVersion, log) {
+  const { findAllJavaInstalls, pickJavaForVersion, getJavaMajorVersion } = require("./javaFinder");
+  const required = javaMajorForMc(mcVersion);
+  if (javaPath) {
+    const v = getJavaMajorVersion(javaPath);
+    if (v && v >= required) return javaPath;
+    if (v) log(`Java из настроек (${v}) ниже ${required}+, ищу другую…`);
+  }
+  const installs = findAllJavaInstalls();
+  const pick = pickJavaForVersion(installs, required);
+  if (!pick || pick.version < required) {
+    const have = installs.length ? installs.map((i) => `Java ${i.version}`).join(", ") : "не найдена";
+    throw new Error(
+      `Для Forge/NeoForge ${mcVersion} нужна Java ${required}+ (сейчас: ${have}). Установите Adoptium Temurin ${required}.`
+    );
+  }
+  log(`Installer Java ${pick.version}: ${pick.path}`);
+  return pick.path;
+}
+
+async function ensureVanillaClient(mcVersion, sharedDir, log) {
+  const dir = path.join(sharedDir, "versions", mcVersion);
+  const jsonPath = path.join(dir, `${mcVersion}.json`);
+  const jarPath = path.join(dir, `${mcVersion}.jar`);
+  if (!fs.existsSync(jsonPath)) {
+    log(`Скачивание version.json ${mcVersion}…`);
+    const manifest = await downloadJSON("https://launchermeta.mojang.com/mc/game/version_manifest.json");
+    const info = (manifest.versions || []).find((v) => v.id === mcVersion);
+    if (!info) throw new Error(`Minecraft ${mcVersion} не найден`);
+    const details = await downloadJSON(info.url);
+    ensureDir(dir);
+    fs.writeFileSync(jsonPath, JSON.stringify(details));
+  }
+  if (!fs.existsSync(jarPath)) {
+    const details = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+    if (!details.downloads?.client?.url) throw new Error(`Нет client.jar для ${mcVersion}`);
+    log(`Скачивание client.jar ${mcVersion}…`);
+    await downloadFile(details.downloads.client.url, jarPath);
+  }
+}
+
+function ensureLauncherProfiles(targetDir) {
+  const profilesPath = path.join(targetDir, "launcher_profiles.json");
+  if (!fs.existsSync(profilesPath)) {
+    fs.writeFileSync(profilesPath, JSON.stringify({ profiles: {}, selectedProfile: "" }));
+  }
+}
+
+function extractInstallerMaven(installerPath, librariesDir, log) {
+  try {
+    const AdmZip = require("adm-zip");
+    const zip = new AdmZip(installerPath);
+    let n = 0;
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory) continue;
+      const name = entry.entryName.replace(/\\/g, "/");
+      if (!name.startsWith("maven/") || name.endsWith("/")) continue;
+      const rel = name.slice("maven/".length);
+      if (!rel) continue;
+      const dest = path.join(librariesDir, rel);
+      if (fs.existsSync(dest)) continue;
+      ensureDir(path.dirname(dest));
+      fs.writeFileSync(dest, entry.getData());
+      n++;
+    }
+    if (n) log(`Из installer извлечено ${n} maven-файлов`);
+  } catch (e) {
+    log(`Не удалось извлечь maven из installer: ${e.message}`);
+  }
+}
+
+function spawnInstaller(javaBin, args, cwd, log) {
+  return new Promise((resolve, reject) => {
+    log(`java ${args.join(" ")}`);
+    const child = spawn(javaBin, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true" },
+    });
+    let err = "";
+    child.stdout.on("data", (d) => {
+      const t = d.toString().trim();
+      if (t) log(t.length > 400 ? `${t.slice(0, 400)}…` : t);
+    });
+    child.stderr.on("data", (d) => {
+      const t = d.toString();
+      err += t;
+      const line = t.trim();
+      if (line) log(line.length > 400 ? `${line.slice(0, 400)}…` : line);
+    });
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {}
+      reject(new Error("Installer завис (таймаут 5 мин)"));
+    }, 5 * 60 * 1000);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`Installer завершился с кодом ${code}${err.trim() ? ": " + err.trim().slice(-400) : ""}`));
+    });
+  });
+}
+
+async function runForgeInstaller(javaBin, installerPath, targetDir, log) {
+  ensureDir(targetDir);
+  ensureLauncherProfiles(targetDir);
+  const attempts = [
+    ["-Djava.awt.headless=true", "-jar", installerPath, "--installClient", targetDir],
+    ["-Djava.awt.headless=true", "-jar", installerPath, "--install-client", targetDir],
+  ];
+  let lastErr;
+  for (const args of attempts) {
+    try {
+      await spawnInstaller(javaBin, args, targetDir, log);
+      return;
+    } catch (e) {
+      lastErr = e;
+      log(`Попытка installer не удалась: ${e.message}`);
+    }
+  }
+  throw lastErr || new Error("Не удалось запустить Forge/NeoForge installer");
+}
+
 // Превращает groupId:artifactId:version в Maven-путь
 function mavenPath(name) {
   const parts = name.split(":");
@@ -373,86 +548,15 @@ async function installQuilt(mcVersion, sharedDir, log) {
   return { id: quiltId };
 }
 
-// ── FORGE ────────────────────────────────────────────────────
-// Устанавливается НЕ запуском installer (он требует Java 8 и часто падает),
-// а извлечением version.json прямо из installer.jar через adm-zip.
-// Это надёжно работает для ВСЕХ версий Forge (1.7–26.x).
-
-async function installForge(mcVersion, sharedDir, javaPath, log) {
-  log(`Установка Forge для ${mcVersion}…`);
-
-  const promo = await downloadJSON(
-    "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
-  ).catch(() => null);
-
-  if (!promo) throw new Error("Не удалось получить список версий Forge");
-
-  let forgeVersion = null;
-  const recKey = `${mcVersion}-recommended`;
-  const latKey = `${mcVersion}-latest`;
-  if (promo.promos[recKey]) forgeVersion = promo.promos[recKey];
-  else if (promo.promos[latKey]) forgeVersion = promo.promos[latKey];
-
-  if (!forgeVersion) {
-    throw new Error(`Forge не поддерживает Minecraft ${mcVersion}. Рекомендую Fabric.`);
-  }
-
-  const forgeId = `${mcVersion}-forge-${forgeVersion}`;
-  const forgeDir = path.join(sharedDir, "versions", forgeId);
-  const versionJsonPath = path.join(forgeDir, `${forgeId}.json`);
-
-  if (fs.existsSync(versionJsonPath)) {
-    return { id: forgeId };
-  }
-
-  log(`Скачивание Forge ${forgeVersion}…`);
-  const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${mcVersion}-${forgeVersion}/forge-${mcVersion}-${forgeVersion}-installer.jar`;
-  const installerPath = path.join(sharedDir, "installers", `forge-${mcVersion}-${forgeVersion}-installer.jar`);
-  await downloadFile(installerUrl, installerPath);
-
-  // Извлекаем version.json из installer jar (через adm-zip или встроенный парсер)
-  const versionData = readInstallerVersionJson(installerPath, log);
-
-  // Приводим id к нашему формату
-  versionData.id = forgeId;
-  versionData.inheritsFrom = mcVersion;
-  ensureDir(forgeDir);
-  fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2));
-
-  // Скачиваем все библиотеки Forge по ссылкам из version.json
-  const librariesDir = path.join(sharedDir, "libraries");
-  const libs = versionData.libraries || [];
-  log(`Скачивание ${libs.length} библиотек Forge…`);
-  let downloaded = 0;
-  for (const lib of libs) {
-    if (lib.downloads && lib.downloads.artifact) {
-      const libPath = path.join(librariesDir, lib.downloads.artifact.path);
-      if (!fs.existsSync(libPath)) {
-        try {
-          await downloadFile(lib.downloads.artifact.url, libPath);
-          downloaded++;
-        } catch (e) {
-          // Могут быть 404 — пропускаем
-        }
-      }
-    }
-  }
-  log(`Загружено библиотек Forge: ${downloaded}`);
-
-  log(`Forge ${forgeVersion} установлен ✓`);
-  return { id: forgeId };
-}
-
 function findVersionProfile(root, hints) {
   const versionsDir = path.join(root, "versions");
   if (!fs.existsSync(versionsDir)) return null;
-  const dirs = fs.readdirSync(versionsDir, { withFileTypes: true })
+  const dirs = fs
+    .readdirSync(versionsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .filter((name) =>
-      hints.some((hint) =>
-        name === hint || name.startsWith(hint + "-") || name.includes(hint)
-      )
+      hints.some((hint) => name === hint || name.startsWith(hint + "-") || name.toLowerCase().includes(String(hint).toLowerCase()))
     )
     .sort()
     .reverse();
@@ -463,74 +567,176 @@ function findVersionProfile(root, hints) {
   return null;
 }
 
-// ── NEOFORGE ─────────────────────────────────────────────────
+async function downloadVersionLibraries(versionData, librariesDir, log) {
+  const libs = versionData.libraries || [];
+  log(`Скачивание ${libs.length} библиотек…`);
+  let downloaded = 0;
+  for (const lib of libs) {
+    const art = lib.downloads && lib.downloads.artifact;
+    if (art && art.path && art.url) {
+      const libPath = path.join(librariesDir, art.path);
+      if (fs.existsSync(libPath)) continue;
+      try {
+        await downloadFile(art.url, libPath);
+        downloaded++;
+      } catch {
+        /* 404 — часто лежит внутри installer */
+      }
+    } else if (lib.name && lib.url) {
+      await downloadMavenLib(lib, librariesDir, log);
+    }
+  }
+  log(`Докачано библиотек: ${downloaded}`);
+}
+
+async function resolveForgeInstallerSpec(mcVersion, log) {
+  const xml = await downloadText(
+    "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
+  );
+  const versions = parseMavenVersions(xml);
+  const matches = versions.filter((v) => v === mcVersion || v.startsWith(`${mcVersion}-`));
+  if (!matches.length) {
+    throw new Error(`Forge не поддерживает Minecraft ${mcVersion}.`);
+  }
+
+  let chosen = matches[matches.length - 1];
+  const promo = await downloadJSON(
+    "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+  ).catch(() => null);
+  if (promo && promo.promos) {
+    const rec = promo.promos[`${mcVersion}-recommended`];
+    const lat = promo.promos[`${mcVersion}-latest`];
+    const recFull = rec && matches.find((v) => v === `${mcVersion}-${rec}` || v.startsWith(`${mcVersion}-${rec}`));
+    const latFull = lat && matches.find((v) => v === `${mcVersion}-${lat}` || v.startsWith(`${mcVersion}-${lat}`));
+    chosen = recFull || latFull || chosen;
+  }
+
+  log(`Forge installer: ${chosen}`);
+  return {
+    idHint: chosen,
+    url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${chosen}/forge-${chosen}-installer.jar`,
+    file: `forge-${chosen}-installer.jar`,
+    hints: [chosen, `${mcVersion}-forge`, "forge"],
+  };
+}
+
+async function resolveNeoForgeInstallerSpec(mcVersion, log) {
+  const prefix = mcVersion.startsWith("1.") ? `${mcVersion.slice(2)}.` : `${mcVersion}.`;
+
+  const neoXml = await downloadText(
+    "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml"
+  ).catch(() => null);
+  const neoVersions = neoXml ? parseMavenVersions(neoXml) : [];
+  const neoMatches = neoVersions.filter((v) => v.startsWith(prefix) && !String(v).includes("beta"));
+  const neoAny = neoVersions.filter((v) => v.startsWith(prefix));
+  const pick = (neoMatches.length ? neoMatches : neoAny).pop();
+
+  if (pick) {
+    log(`NeoForge installer: ${pick}`);
+    return {
+      idHint: pick,
+      url: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${pick}/neoforge-${pick}-installer.jar`,
+      file: `neoforge-${pick}-installer.jar`,
+      hints: [`neoforge-${pick}`, pick, "neoforge"],
+    };
+  }
+
+  const forgeXml = await downloadText(
+    "https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml"
+  ).catch(() => null);
+  const forgeVersions = forgeXml ? parseMavenVersions(forgeXml) : [];
+  const forgeMatches = forgeVersions.filter((v) => v.startsWith(`${mcVersion}-`));
+  const forgePick = forgeMatches.pop();
+  if (!forgePick) {
+    throw new Error(`NeoForge не найден для Minecraft ${mcVersion}.`);
+  }
+  log(`NeoForge (legacy artifact) installer: ${forgePick}`);
+  return {
+    idHint: forgePick,
+    url: `https://maven.neoforged.net/releases/net/neoforged/forge/${forgePick}/forge-${forgePick}-installer.jar`,
+    file: `neoforge-forge-${forgePick}-installer.jar`,
+    hints: [forgePick, "neoforge", "forge"],
+  };
+}
+
+function profileLooksComplete(root, id) {
+  const jsonPath = path.join(root, "versions", id, `${id}.json`);
+  if (!fs.existsSync(jsonPath)) return false;
+  try {
+    const data = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+    if (!data.mainClass) return false;
+    const librariesDir = path.join(root, "libraries");
+    const libs = data.libraries || [];
+    let missing = 0;
+    let checked = 0;
+    for (const lib of libs) {
+      const p = lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path;
+      if (!p) continue;
+      checked++;
+      if (!fs.existsSync(path.join(librariesDir, p))) missing++;
+    }
+    if (checked > 8 && missing > checked * 0.35) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function installWithInstaller(kind, spec, mcVersion, sharedDir, javaPath, log) {
+  const existing = findVersionProfile(sharedDir, spec.hints);
+  if (existing && profileLooksComplete(sharedDir, existing)) {
+    log(`${kind} уже установлен: ${existing}`);
+    return { id: existing };
+  }
+  if (existing) {
+    log(`${kind} профиль «${existing}» неполный — переустанавливаю через installer`);
+  }
+
+  await ensureVanillaClient(mcVersion, sharedDir, log);
+
+  const installerPath = path.join(sharedDir, "installers", spec.file);
+  log(`Скачивание ${kind} installer…`);
+  await downloadFile(spec.url, installerPath);
+
+  const librariesDir = path.join(sharedDir, "libraries");
+  extractInstallerMaven(installerPath, librariesDir, log);
+
+  if (isLegacyForgeMc(mcVersion) && kind === "Forge") {
+    log("Старый Forge (до 1.13): собираю профиль из installer.jar без GUI");
+    const versionData = readInstallerVersionJson(installerPath, log);
+    const id = versionData.id || `${mcVersion}-forge-${spec.idHint}`;
+    versionData.id = id;
+    if (!versionData.inheritsFrom) versionData.inheritsFrom = mcVersion;
+    const dir = path.join(sharedDir, "versions", id);
+    ensureDir(dir);
+    fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(versionData, null, 2));
+    await downloadVersionLibraries(versionData, librariesDir, log);
+    log(`${kind} ${id} установлен ✓`);
+    return { id };
+  }
+
+  const javaBin = pickInstallerJava(javaPath, mcVersion, log);
+  log(`Запуск ${kind} installer (это может занять пару минут)…`);
+  await runForgeInstaller(javaBin, installerPath, sharedDir, log);
+
+  const installed = findVersionProfile(sharedDir, spec.hints);
+  if (!installed) {
+    throw new Error(`${kind} installer отработал, но профиль версии не найден в ${path.join(sharedDir, "versions")}`);
+  }
+  log(`${kind} установлен ✓ (${installed})`);
+  return { id: installed };
+}
+
+async function installForge(mcVersion, sharedDir, javaPath, log) {
+  log(`Установка Forge для ${mcVersion}…`);
+  const spec = await resolveForgeInstallerSpec(mcVersion, log);
+  return installWithInstaller("Forge", spec, mcVersion, sharedDir, javaPath, log);
+}
 
 async function installNeoForge(mcVersion, sharedDir, javaPath, log) {
   log(`Установка NeoForge для ${mcVersion}…`);
-
-  // Новый API NeoForge (с 2023): /api/maven/v2/versions/releases/net/neoforged/neoforge
-  const api = "https://maven.neoforged.net/api/maven/v2/versions/releases/net/neoforged/neoforge";
-  let versions = [];
-  try {
-    const data = await downloadJSON(api);
-    versions = Array.isArray(data) ? data : (data.versions || []);
-  } catch (err) {
-    log(`NeoForge API недоступно (${err.message}). Попробуйте Fabric.`);
-    throw new Error("NeoForge API недоступно. Попробуйте Fabric.");
-  }
-
-  if (versions.length === 0) throw new Error("NeoForge не поддерживает эту версию Minecraft");
-
-  const mcMajor = String(parseInt(mcVersion.split(".")[1]));
-  const matches = versions.filter((v) => {
-    const parts = String(v).split(".");
-    return parts[0] === mcMajor || parts[0] === mcVersion.replace(/\./g, ".");
-  });
-  if (matches.length === 0) throw new Error(`NeoForge не найден для ${mcVersion}`);
-  const nfVersion = matches[matches.length - 1];
-  const nfId = `neoforge-${nfVersion}`;
-  const nfDir = path.join(sharedDir, "versions", nfId);
-  const versionJsonPath = path.join(nfDir, `${nfId}.json`);
-
-  if (fs.existsSync(versionJsonPath)) {
-    return { id: nfId };
-  }
-
-  log(`Скачивание NeoForge ${nfVersion}…`);
-  const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${nfVersion}/neoforge-${nfVersion}-installer.jar`;
-  const installerPath = path.join(sharedDir, "installers", `neoforge-${nfVersion}-installer.jar`);
-  await downloadFile(installerUrl, installerPath);
-
-  // Извлекаем version.json из installer jar (без запуска Java)
-  const versionData = readInstallerVersionJson(installerPath, log);
-
-  versionData.id = nfId;
-  versionData.inheritsFrom = mcVersion;
-  ensureDir(nfDir);
-  fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2));
-
-  // Скачиваем библиотеки NeoForge
-  const librariesDir = path.join(sharedDir, "libraries");
-  const libs = versionData.libraries || [];
-  log(`Скачивание ${libs.length} библиотек NeoForge…`);
-  let downloaded = 0;
-  for (const lib of libs) {
-    if (lib.downloads && lib.downloads.artifact) {
-      const libPath = path.join(librariesDir, lib.downloads.artifact.path);
-      if (!fs.existsSync(libPath)) {
-        try {
-          await downloadFile(lib.downloads.artifact.url, libPath);
-          downloaded++;
-        } catch (e) {
-          // 404 или недоступно — пропускаем
-        }
-      }
-    }
-  }
-  log(`Загружено библиотек NeoForge: ${downloaded}`);
-
-  log(`NeoForge ${nfVersion} установлен ✓`);
-  return { id: nfId };
+  const spec = await resolveNeoForgeInstallerSpec(mcVersion, log);
+  return installWithInstaller("NeoForge", spec, mcVersion, sharedDir, javaPath, log);
 }
 
 // Главная функция
