@@ -923,4 +923,9 @@ async function installLoader(loaderType, mcVersion, sharedDir, javaPath, onProgr
   }
 }
 
-module.exports = { installLoader };
+module.exports = {
+  installLoader,
+  resolveLibraryJar,
+  findForgeJars,
+  aliasUniversalJars,
+};
