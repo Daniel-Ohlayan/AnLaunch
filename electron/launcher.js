@@ -788,12 +788,25 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     jvmArgs.push("-cp", finalCp);
   }
 
+  // BootstrapLauncher фильтрует classpath через startsWith(ignoreList).
+  // Нельзя класть туда forgespi/coremods/любой jar с «forge» в имени —
+  // иначе module net.minecraftforge.forgespi not found (его требует coremod).
+  // Официально: bootstrap/asm/jarjar/client-extra + version jar на -cp.
   const extraIgnore = [];
   if (fs.existsSync(clientJarPath)) extraIgnore.push(path.basename(clientJarPath));
   if (fs.existsSync(versionJarPath)) extraIgnore.push(path.basename(versionJarPath));
+  for (const p of moduleJars) extraIgnore.push(path.basename(p));
   for (const c of classpath) {
     const b = path.basename(c);
-    if (/forge|neoforge|client-extra|bootstraplauncher|asm-/i.test(b)) extraIgnore.push(b);
+    if (
+      /client-extra/i.test(b) ||
+      /^asm[-_]/i.test(b) ||
+      /^bootstraplauncher/i.test(b) ||
+      /^securejarhandler/i.test(b) ||
+      /jarjar/i.test(b)
+    ) {
+      extraIgnore.push(b);
+    }
   }
   patchIgnoreList(jvmArgs, extraIgnore);
 

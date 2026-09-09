@@ -364,6 +364,7 @@ export default function App() {
   }
 
   async function launch() {
+    if (launchStatus === "running") return;
     if (!activeAccount) {
       setAccountsOpen(true);
       return;
@@ -433,7 +434,6 @@ export default function App() {
         const unsub = window.electronAPI.onLaunchProgress((msg) => {
           step = Math.min(95, step + 5);
           setLaunching((l) => ({ ...l, progress: step, label: msg }));
-          addLog("info", msg);
         });
 
         const result = await launchMinecraftReal({
