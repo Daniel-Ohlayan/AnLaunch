@@ -116,6 +116,24 @@ function isLegacyForgeMc(mcVersion) {
   return p.major === 1 && p.minor < 13;
 }
 
+// LaunchWrapper (FMLTweaker) — Minecraft 1.16.x и ниже.
+// Нельзя parseFloat("1.20") — это 1.2, и 1.20 ошибочно считается «старым».
+function isLaunchWrapperForge(mcVersion) {
+  const p = mcMinorParts(mcVersion);
+  return p.major === 1 && p.minor < 17;
+}
+
+function versionIdMatchesMc(id, mcVersion) {
+  const mc = String(mcVersion || "").toLowerCase();
+  const n = String(id || "").toLowerCase();
+  if (!mc) return true;
+  if (n === mc || n.startsWith(`${mc}-`) || n.startsWith(`${mc}_`)) return true;
+  if (n.includes(`-${mc}-`) || n.endsWith(`-${mc}`)) return true;
+  if (n.includes(`${mc}-forge`) || n.includes(`forge-${mc}`)) return true;
+  if (n.includes(`${mc}-neoforge`) || n.includes(`neoforge-${mc}`)) return true;
+  return false;
+}
+
 function javaMajorForMc(mcVersion) {
   if (/^26(\.|$)/.test(mcVersion)) return 25;
   const p = mcMinorParts(mcVersion);
@@ -721,16 +739,33 @@ async function installQuilt(mcVersion, sharedDir, log) {
   return { id: quiltId };
 }
 
-function findVersionProfile(root, hints) {
+function findVersionProfile(root, hints, mcVersion) {
   const versionsDir = path.join(root, "versions");
   if (!fs.existsSync(versionsDir)) return null;
+  const generic = new Set(["forge", "neoforge"]);
   const dirs = fs
     .readdirSync(versionsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .filter((name) =>
-      hints.some((hint) => name === hint || name.startsWith(hint + "-") || name.toLowerCase().includes(String(hint).toLowerCase()))
-    )
+    .filter((name) => {
+      // Папки вроде 1.12.2-forge-… не должны подходить к 1.20.1.
+      // NeoForge id (neoforge-21.1.x) часто без «1.21.1» — их не режем.
+      if (
+        mcVersion &&
+        /forge/i.test(name) &&
+        !/neoforge/i.test(name) &&
+        !versionIdMatchesMc(name, mcVersion)
+      ) {
+        return false;
+      }
+      return hints.some((hint) => {
+        const h = String(hint || "");
+        if (!h || generic.has(h.toLowerCase())) return false;
+        const nl = name.toLowerCase();
+        const hl = h.toLowerCase();
+        return nl === hl || nl.startsWith(`${hl}-`) || nl.includes(hl);
+      });
+    })
     .sort()
     .reverse();
 
@@ -789,7 +824,7 @@ async function resolveForgeInstallerSpec(mcVersion, log) {
     idHint: chosen,
     url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${chosen}/forge-${chosen}-installer.jar`,
     file: `forge-${chosen}-installer.jar`,
-    hints: [chosen, `${mcVersion}-forge`, "forge"],
+    hints: [chosen, `${mcVersion}-forge`, `forge-${chosen}`, `forge-${mcVersion}`],
   };
 }
 
@@ -810,7 +845,7 @@ async function resolveNeoForgeInstallerSpec(mcVersion, log) {
       idHint: pick,
       url: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${pick}/neoforge-${pick}-installer.jar`,
       file: `neoforge-${pick}-installer.jar`,
-      hints: [`neoforge-${pick}`, pick, "neoforge"],
+      hints: [`neoforge-${pick}`, pick],
     };
   }
 
@@ -828,7 +863,7 @@ async function resolveNeoForgeInstallerSpec(mcVersion, log) {
     idHint: forgePick,
     url: `https://maven.neoforged.net/releases/net/neoforged/forge/${forgePick}/forge-${forgePick}-installer.jar`,
     file: `neoforge-forge-${forgePick}-installer.jar`,
-    hints: [forgePick, "neoforge", "forge"],
+    hints: [forgePick, `${mcVersion}-forge`, `forge-${mcVersion}`],
   };
 }
 
@@ -868,7 +903,7 @@ function profileLooksComplete(root, id) {
 }
 
 async function installWithInstaller(kind, spec, mcVersion, sharedDir, javaPath, log) {
-  const existing = findVersionProfile(sharedDir, spec.hints);
+  const existing = findVersionProfile(sharedDir, spec.hints, mcVersion);
   if (existing && profileLooksComplete(sharedDir, existing)) {
     log(`${kind} уже установлен: ${existing}`);
     return { id: existing };
@@ -914,7 +949,7 @@ async function installWithInstaller(kind, spec, mcVersion, sharedDir, javaPath, 
   log(`Запуск ${kind} installer (это может занять пару минут)…`);
   await runForgeInstaller(javaBin, installerPath, sharedDir, log);
 
-  const installed = findVersionProfile(sharedDir, spec.hints);
+  const installed = findVersionProfile(sharedDir, spec.hints, mcVersion);
   if (!installed) {
     throw new Error(`${kind} installer отработал, но профиль версии не найден в ${path.join(sharedDir, "versions")}`);
   }

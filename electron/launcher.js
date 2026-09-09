@@ -341,31 +341,35 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
 
   try {
     const { findAllJavaInstalls, getRequiredJavaVersion, pickJavaForVersion, findJavaByVersion, getJavaMajorVersion, maxJavaForGame } = require("./javaFinder");
+    const { isLaunchWrapperForge } = require("./loaders");
     const requiredJava = getRequiredJavaVersion(details);
     const maxJava = maxJavaForGame(loader, version, requiredJava);
     const installs = findAllJavaInstalls();
 
-    // Forge < 1.17 (LaunchWrapper) ТРЕБУЕТ Java 8 — на Java 9+ падает
-    // ClassCastException: AppClassLoader cannot be cast to URLClassLoader
-    // Потому что LaunchWrapper.launch() делает (URLClassLoader) getClass().getClassLoader()
-    const isLegacyForge = loader === "forge" && parseFloat(version.split(".").slice(0, 2).join(".")) < 1.17;
+    // Forge 1.16 и ниже — LaunchWrapper, нужна ровно Java 8.
+    // parseFloat("1.20") === 1.2, поэтому сравниваем minor как целое.
+    const isLegacyForge = loader === "forge" && isLaunchWrapperForge(version);
 
+    let useManual = false;
     if (manualJavaPath) {
       const manualVersion = getJavaMajorVersion(javaBin);
       if (!manualVersion) throw new Error(`Не удалось запустить Java: ${javaBin}`);
-      detectedJava = manualVersion;
-      log(`Использую Java из настроек: ${javaBin} (Java ${manualVersion})`);
-      if (isLegacyForge && manualVersion !== 8) {
-        throw new Error(`Forge ${version} требует Java 8, а в настройках выбрана Java ${manualVersion}.`);
-      }
-      if (!isLegacyForge && manualVersion < requiredJava) {
-        throw new Error(`Minecraft ${version} требует Java ${requiredJava}+, а в настройках выбрана Java ${manualVersion}.`);
-      }
-      if (!isLegacyForge && maxJava < 99 && manualVersion > maxJava) {
-        throw new Error(
-          `${loader} ${version} не запускается на Java ${manualVersion}. Нужна Java ${requiredJava}–${maxJava}.`
+      const tooOld = isLegacyForge ? manualVersion !== 8 : manualVersion < requiredJava;
+      const tooNew = !isLegacyForge && maxJava < 99 && manualVersion > maxJava;
+      if (tooOld || tooNew) {
+        log(
+          `Java из настроек (Java ${manualVersion}) не подходит для ${loader} ${version}` +
+            (isLegacyForge ? " (нужна Java 8)" : ` (нужна Java ${requiredJava}${maxJava < 99 ? "–" + maxJava : "+"})`) +
+            " — ищу другую…"
         );
+      } else {
+        useManual = true;
+        detectedJava = manualVersion;
+        log(`Использую Java из настроек: ${javaBin} (Java ${manualVersion})`);
       }
+    }
+    if (useManual) {
+      // Java из настроек уже проверена
     } else if (isLegacyForge) {
       mustUseExactJava = true;
       requiredExactVersion = 8;
@@ -561,24 +565,8 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     /FMLTweaker/i.test(details.minecraftArguments || "") ||
     /launchwrapper/i.test(String(details.mainClass || ""));
   if (needsFml) {
-    const hasForgeJar = classpath.some((c) => {
-      const b = path.basename(c).toLowerCase();
-      return /forge/i.test(b) && !/installer/i.test(b) && !/launchwrapper/i.test(b);
-    });
-    if (!hasForgeJar) {
-      const extra = findForgeJars(librariesDir);
-      for (const jar of extra) {
-        if (!classpath.includes(jar)) {
-          classpath.push(jar);
-          log(`Добавляю Forge jar: ${path.basename(jar)}`);
-        }
-      }
-    }
-    const stillMissing = !classpath.some((c) => {
-      const b = path.basename(c).toLowerCase();
-      return /forge/i.test(b) && !/installer/i.test(b) && !/launchwrapper/i.test(b);
-    });
-    if (stillMissing) {
+    const tweaker = ensureLegacyForgeClasspath(sharedDir, classpath, log);
+    if (!tweaker) {
       throw new Error(
         "Не найден forge-*-universal.jar (класс FMLTweaker). " +
           "Удалите папку versions в каталоге AnLaunch и запустите снова — Forge переустановится."

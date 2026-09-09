@@ -22,8 +22,7 @@ import type { Account } from "./lib/accounts";
 import { getActiveAccount, saveMicrosoftAccount } from "./lib/accounts";
 import { launchMinecraftReal } from "./lib/minecraft";
 import { PlayIcon } from "./components/icons";
-import LogsDrawer from "./components/LogsDrawer";
-import type { LogEntry, ProfileInfo } from "./types/electron";
+import type { ProfileInfo } from "./types/electron";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("play");
@@ -137,24 +136,12 @@ export default function App() {
   });
 
   const [diagToast, setDiagToast] = useState<string | null>(null);
-  const [logsOpen, setLogsOpen] = useState(false);
-  const [logLines, setLogLines] = useState<LogEntry[]>([]);
 
   // Load active account
   useEffect(() => {
     const account = getActiveAccount();
     setActiveAccount(account);
     refreshProfiles();
-  }, []);
-
-  useEffect(() => {
-    if (!window.electronAPI) return;
-    window.electronAPI.getLogs().then((r) => {
-      if (r.success) setLogLines(r.logs);
-    });
-    return window.electronAPI.onLogEntry((entry) => {
-      setLogLines((prev) => [...prev.slice(-800), entry]);
-    });
   }, []);
 
   // Сохранение home settings
@@ -396,7 +383,6 @@ export default function App() {
     setLaunchStatus("running");
     // Открываем отдельное окно логов (как в Lunar Client)
     if (openLogsOnLaunch) {
-      setLogsOpen(true);
       window.electronAPI?.openLogsWindow();
     }
     // Очищаем предыдущие логи и пишем новые
@@ -493,7 +479,7 @@ export default function App() {
         } else {
           addLog("error", result.message);
           setLaunchStatus("error");
-          setLogsOpen(true);
+          window.electronAPI?.openLogsWindow();
           setLaunching((l) => ({
             ...l,
             progress: 100,
@@ -504,7 +490,7 @@ export default function App() {
       } catch (e) {
         addLog("error", e instanceof Error ? e.message : String(e));
         setLaunchStatus("error");
-        setLogsOpen(true);
+        window.electronAPI?.openLogsWindow();
         setLaunching((l) => ({
           ...l,
           progress: 100,
@@ -559,7 +545,6 @@ export default function App() {
           onDiagnostics={copyDiagnostics}
           onHomeSettings={() => setHomeSettingsOpen(true)}
           onShowLogs={() => {
-            setLogsOpen(true);
             window.electronAPI?.openLogsWindow();
           }}
           hasRunningLaunch={launchStatus === "running"}
@@ -708,8 +693,6 @@ export default function App() {
         defaultVersion={gameVersion}
         defaultLoader={loader}
       />
-
-      <LogsDrawer open={logsOpen} onClose={() => setLogsOpen(false)} logs={logLines} />
 
       {diagToast && (
         <div className="fixed bottom-6 right-6 z-[80] animate-scale-in rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-4 py-3 text-sm text-emerald-200 shadow-2xl backdrop-blur-md">
