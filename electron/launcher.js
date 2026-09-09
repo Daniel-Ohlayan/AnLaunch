@@ -595,6 +595,10 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   classpath.length = 0;
   classpath.push(...dedupedCp);
 
+  if (!isLaunchWrapperForge(version) && (loader === "forge" || loader === "neoforge")) {
+    ensureJarJarOnClasspath(librariesDir, classpath, log);
+  }
+
   const needsFml =
     /FMLTweaker/i.test(details.minecraftArguments || "") ||
     /launchwrapper/i.test(String(details.mainClass || ""));
@@ -789,9 +793,8 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   }
 
   // BootstrapLauncher фильтрует classpath через startsWith(ignoreList).
-  // Нельзя класть туда forgespi/coremods/любой jar с «forge» в имени —
-  // иначе module net.minecraftforge.forgespi not found (его требует coremod).
-  // Официально: bootstrap/asm/jarjar/client-extra + version jar на -cp.
+  // Нельзя класть туда forgespi, coremods, JarJarSelector — FML их грузит
+  // как модули. На -p обычно только JarJarFileSystems (уже в moduleJars).
   const extraIgnore = [];
   if (fs.existsSync(clientJarPath)) extraIgnore.push(path.basename(clientJarPath));
   if (fs.existsSync(versionJarPath)) extraIgnore.push(path.basename(versionJarPath));
@@ -803,12 +806,14 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
       /^asm[-_]/i.test(b) ||
       /^bootstraplauncher/i.test(b) ||
       /^securejarhandler/i.test(b) ||
-      /jarjar/i.test(b)
+      /^jarjarfilesystems/i.test(b) ||
+      /^jarjarparser/i.test(b)
     ) {
       extraIgnore.push(b);
     }
   }
   patchIgnoreList(jvmArgs, extraIgnore);
+  sanitizeIgnoreList(jvmArgs);
 
   // Пользовательские JVM-аргументы из настроек — добавляются до mainClass
   if (config.jvmArgs) {
@@ -1043,6 +1048,51 @@ function patchIgnoreList(jvmArgs, extraNames) {
     }
     jvmArgs[i] = "-DignoreList=" + parts.join(",");
   }
+}
+
+function sanitizeIgnoreList(jvmArgs) {
+  const drop = /jarjarselector|jarjarmetadata|forgespi|coremods/i;
+  for (let i = 0; i < jvmArgs.length; i++) {
+    const a = String(jvmArgs[i]);
+    if (!a.startsWith("-DignoreList=")) continue;
+    const parts = a.slice("-DignoreList=".length).split(",").filter((p) => p && !drop.test(p));
+    jvmArgs[i] = "-DignoreList=" + parts.join(",");
+  }
+}
+
+function ensureJarJarOnClasspath(librariesDir, classpath, log) {
+  const needed = ["JarJarSelector", "JarJarMetadata"];
+  for (const art of needed) {
+    if (classpath.some((c) => path.basename(c).toLowerCase().includes(art.toLowerCase()))) continue;
+    const root = path.join(librariesDir, "net", "minecraftforge", art);
+    const jar = findNewestJar(root);
+    if (jar) {
+      classpath.push(jar);
+      if (log) log(`Classpath: ${path.basename(jar)}`);
+    }
+  }
+}
+
+function findNewestJar(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const jars = [];
+  const walk = (d, depth) => {
+    if (depth > 5) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full, depth + 1);
+      else if (/\.jar$/i.test(e.name) && !/-sources|-javadoc/i.test(e.name)) jars.push(full);
+    }
+  };
+  walk(dir, 0);
+  jars.sort();
+  return jars.length ? jars[jars.length - 1] : null;
 }
 
 function getRequiredJavaVersionSafe(details) {
