@@ -1034,4 +1034,6 @@ module.exports = {
   ensureLegacyForgeClasspath,
   isFmlTweakerJar,
   isLibrariesForgeJar,
+  isLaunchWrapperForge,
+  isLegacyForgeMc,
 };

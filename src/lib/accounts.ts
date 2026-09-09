@@ -10,6 +10,9 @@ export interface Account {
   accessToken?: string;
   refreshToken?: string;
   createdAt: number;
+  skinPath?: string;
+  capePath?: string;
+  slim?: boolean;
 }
 
 const STORAGE_KEY = "anlaunch_accounts";
@@ -88,8 +91,15 @@ export function createAccount(username: string): Account {
 // Сохранение / обновление Microsoft-аккаунта
 export function saveMicrosoftAccount(account: Account): Account {
   const accounts = getAllAccounts();
-  const idx = accounts.findIndex((a) => a.id === account.id);
+  const idx = accounts.findIndex((a) => a.id === account.id || (account.uuid && a.uuid === account.uuid));
   if (idx >= 0) {
+    const prev = accounts[idx];
+    account = {
+      ...account,
+      skinPath: account.skinPath || prev.skinPath,
+      capePath: account.capePath || prev.capePath,
+      slim: account.slim ?? prev.slim,
+    };
     accounts[idx] = account;
   } else {
     accounts.push(account);
@@ -125,4 +135,24 @@ export function updateAccount(id: string, username: string): void {
     account.uuid = generateOfflineUUID(username);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
   }
+}
+
+export function updateAccountTextures(
+  id: string,
+  patch: { skinPath?: string | null; capePath?: string | null; slim?: boolean }
+): Account | null {
+  const accounts = getAllAccounts();
+  const account = accounts.find((a) => a.id === id);
+  if (!account) return null;
+  if ("skinPath" in patch) {
+    if (patch.skinPath) account.skinPath = patch.skinPath;
+    else delete account.skinPath;
+  }
+  if ("capePath" in patch) {
+    if (patch.capePath) account.capePath = patch.capePath;
+    else delete account.capePath;
+  }
+  if ("slim" in patch) account.slim = !!patch.slim;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
+  return account;
 }

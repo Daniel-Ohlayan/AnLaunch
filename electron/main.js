@@ -335,6 +335,32 @@ ipcMain.handle("open-file-dialog", async (_event, { title, filters, multiple }) 
 });
 
 // Прочитать локальный файл как data URL (для превью)
+ipcMain.handle("save-account-texture", async (_event, { accountId, kind, sourcePath }) => {
+  try {
+    const { copyTextureFile } = require("./skins");
+    const id = String(accountId || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "");
+    if (!id) return { success: false, error: "Нет аккаунта" };
+    const name = kind === "cape" ? "cape.png" : "skin.png";
+    const dest = path.join(app.getPath("userData"), "textures", id, name);
+    copyTextureFile(sourcePath, dest);
+    return { success: true, path: dest };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle("remove-account-texture", async (_event, { accountId, kind }) => {
+  try {
+    const id = String(accountId || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "");
+    const name = kind === "cape" ? "cape.png" : "skin.png";
+    const dest = path.join(app.getPath("userData"), "textures", id, name);
+    if (fs.existsSync(dest)) fs.unlinkSync(dest);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle("read-file-as-data-url", async (_event, filePath) => {
   try {
     const buf = fs.readFileSync(filePath);

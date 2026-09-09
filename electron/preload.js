@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeModFromProfile: (data) => ipcRenderer.invoke("remove-mod-from-profile", data),
 
   // Настройки главного экрана
+  saveAccountTexture: (data) => ipcRenderer.invoke("save-account-texture", data),
+  removeAccountTexture: (data) => ipcRenderer.invoke("remove-account-texture", data),
   openFileDialog: (data) => ipcRenderer.invoke("open-file-dialog", data),
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke("read-file-as-data-url", filePath),
   saveDataUrl: (data) => ipcRenderer.invoke("save-data-url", data),

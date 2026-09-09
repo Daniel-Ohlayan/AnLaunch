@@ -107,6 +107,14 @@ function filterIncompatibleJvmArgs(args, javaVersion, log) {
   return result;
 }
 
+// LaunchWrapper / FMLTweaker — только 1.16 и ниже.
+// Нельзя parseFloat("1.20"): это 1.2, и 1.20.1 ошибочно считается «старым».
+function isLaunchWrapperForge(mcVersion) {
+  const parts = String(mcVersion || "").split(".").map((n) => parseInt(n, 10));
+  const minor = parts[0] === 1 ? parts[1] || 0 : 99;
+  return Number.isFinite(minor) && minor < 17;
+}
+
 function getCurrentOS() {
   const p = os.platform();
   if (p === "win32") return "windows";
@@ -341,7 +349,6 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
 
   try {
     const { findAllJavaInstalls, getRequiredJavaVersion, pickJavaForVersion, findJavaByVersion, getJavaMajorVersion, maxJavaForGame } = require("./javaFinder");
-    const { isLaunchWrapperForge } = require("./loaders");
     const requiredJava = getRequiredJavaVersion(details);
     const maxJava = maxJavaForGame(loader, version, requiredJava);
     const installs = findAllJavaInstalls();
@@ -798,7 +805,26 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     }
   }
 
-  const allArgs = [...memoryArgs, ...jvmArgs, mainClass, ...gameArgs];
+  let allArgs = [...memoryArgs, ...jvmArgs, mainClass, ...gameArgs];
+  try {
+    const { applyLaunchTextures } = require("./skins");
+    const dashedUuid = String(effectiveUuid || "").replace(
+      /([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})/i,
+      "$1-$2-$3-$4-$5"
+    );
+    const jvmAll = await applyLaunchTextures(
+      {
+        ...config,
+        account: { ...account, uuid: dashedUuid || account.uuid },
+      },
+      { sharedDir, gameDir },
+      [...memoryArgs, ...jvmArgs],
+      log
+    );
+    allArgs = [...jvmAll, mainClass, ...gameArgs];
+  } catch (e) {
+    log(`Скин/плащ: ${e.message}`);
+  }
 
   // 6. Запуск
   if (!mainClass) {

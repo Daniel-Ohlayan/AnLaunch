@@ -6,8 +6,42 @@ import {
   getAllAccounts,
   saveMicrosoftAccount,
   setActiveAccount,
+  updateAccountTextures,
 } from "../lib/accounts";
 import { CheckIcon, CloseIcon } from "./icons";
+
+function McHead({ src, letter, active }: { src?: string; letter: string; active?: boolean }) {
+  return (
+    <div
+      className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ${
+        src
+          ? "bg-[#1a1a22]"
+          : active
+            ? "bg-gradient-to-br from-emerald-400 to-teal-500"
+            : "bg-gradient-to-br from-slate-500 to-slate-700"
+      }`}
+    >
+      {src ? (
+        <>
+          <img
+            alt=""
+            src={src}
+            className="pointer-events-none absolute max-w-none"
+            style={{ width: 80, height: 80, left: -10, top: -10, imageRendering: "pixelated" }}
+          />
+          <img
+            alt=""
+            src={src}
+            className="pointer-events-none absolute max-w-none"
+            style={{ width: 80, height: 80, left: -50, top: -10, imageRendering: "pixelated" }}
+          />
+        </>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-sm font-bold text-white">{letter}</div>
+      )}
+    </div>
+  );
+}
 
 export default function AccountsModal({
   open,
@@ -31,15 +65,80 @@ export default function AccountsModal({
   const [showBrowser, setShowBrowser] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("");
   const [pasteUrl, setPasteUrl] = useState("");
+  const [previews, setPreviews] = useState<Record<string, { skin?: string; cape?: string }>>({});
 
   useEffect(() => {
-    if (open) {
-      setAccounts(getAllAccounts());
-      setConfirmDelete(null);
-      setError(null);
-      setMsStatus(null);
-    }
+    if (!open) return;
+    const list = getAllAccounts();
+    setAccounts(list);
+    setConfirmDelete(null);
+    setError(null);
+    setMsStatus(null);
+    (async () => {
+      if (!window.electronAPI) return;
+      const next: Record<string, { skin?: string; cape?: string }> = {};
+      for (const a of list) {
+        const p: { skin?: string; cape?: string } = {};
+        if (a.skinPath) {
+          const r = await window.electronAPI.readFileAsDataUrl(a.skinPath);
+          if (r.success && r.dataUrl) p.skin = r.dataUrl;
+        }
+        if (a.capePath) {
+          const r = await window.electronAPI.readFileAsDataUrl(a.capePath);
+          if (r.success && r.dataUrl) p.cape = r.dataUrl;
+        }
+        next[a.id] = p;
+      }
+      setPreviews(next);
+    })();
   }, [open]);
+
+  async function pickTexture(account: Account, kind: "skin" | "cape") {
+    if (!window.electronAPI) {
+      setError("Скин и плащ можно добавить только в установленном лаунчере.");
+      return;
+    }
+    setError(null);
+    const dlg = await window.electronAPI.openFileDialog({
+      title: kind === "cape" ? "Выберите плащ (PNG 64×32)" : "Выберите скин (PNG 64×64)",
+      filters: [{ name: "PNG", extensions: ["png"] }],
+    });
+    if (!dlg.success || !dlg.paths?.[0]) return;
+    const saved = await window.electronAPI.saveAccountTexture({
+      accountId: account.id,
+      kind,
+      sourcePath: dlg.paths[0],
+    });
+    if (!saved.success || !saved.path) {
+      setError(saved.error || "Не удалось сохранить PNG");
+      return;
+    }
+    const updated = updateAccountTextures(
+      account.id,
+      kind === "cape" ? { capePath: saved.path } : { skinPath: saved.path }
+    );
+    setAccounts(getAllAccounts());
+    if (updated && activeAccount?.id === account.id) onChange(updated);
+    const prev = await window.electronAPI.readFileAsDataUrl(saved.path);
+    setPreviews((s) => ({
+      ...s,
+      [account.id]: { ...s[account.id], [kind]: prev.dataUrl },
+    }));
+  }
+
+  async function clearTexture(account: Account, kind: "skin" | "cape") {
+    await window.electronAPI?.removeAccountTexture({ accountId: account.id, kind });
+    const updated = updateAccountTextures(
+      account.id,
+      kind === "cape" ? { capePath: null } : { skinPath: null }
+    );
+    setAccounts(getAllAccounts());
+    if (updated && activeAccount?.id === account.id) onChange(updated);
+    setPreviews((s) => ({
+      ...s,
+      [account.id]: { ...s[account.id], [kind]: undefined },
+    }));
+  }
 
   async function finishMicrosoft(res: { success: true; account: Account } | { success: false; error: string }) {
     if (res.success) {
@@ -292,15 +391,11 @@ export default function AccountsModal({
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      {/* Minecraft-style head avatar */}
-                      <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${
-                          isActive ? "from-emerald-400 to-teal-500" : "from-slate-500 to-slate-700"
-                        } text-sm font-bold text-white`}
-                        style={{ imageRendering: "pixelated" }}
-                      >
-                        {account.username[0].toUpperCase()}
-                      </div>
+                      <McHead
+                        src={previews[account.id]?.skin}
+                        letter={account.username[0].toUpperCase()}
+                        active={isActive}
+                      />
 
                       <div className="min-w-0 flex-1">
                         {isEditing ? (
@@ -399,9 +494,8 @@ export default function AccountsModal({
         {/* Footer */}
         <div className="border-t border-[#1c2438] p-4">
           <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3 text-xs text-yellow-200/70">
-            💡 <b className="text-yellow-200">Пиратские (оффлайн) аккаунты</b> работают без лицензии
-            Minecraft — как в TLauncher. Можно играть в одиночке и на пиратских (offline-mode)
-            серверах. UUID вычисляется правильно, ник сохраняется локально.
+            💡 У каждого аккаунта можно поставить <b className="text-yellow-200">свой скин и плащ</b> (PNG).
+            На оффлайн они видны в игре. На Microsoft скин загружается в Mojang; чужой плащ — только оффлайн.
           </div>
         </div>
       </div>

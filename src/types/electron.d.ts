@@ -42,6 +42,9 @@ export interface ElectronAPI {
   getAutoStart: () => Promise<{ success: boolean; enabled: boolean }>;
   launchMinecraftReal: (config: {
     account: { username: string; uuid: string; accessToken?: string; type?: string; xuid?: string; refreshToken?: string };
+    skinPath?: string;
+    capePath?: string;
+    slim?: boolean;
     version: string;
     loader: string;
     ram: number;
