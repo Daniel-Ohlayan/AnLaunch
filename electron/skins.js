@@ -28,11 +28,84 @@ function isPng(buf) {
 
 function copyTextureFile(sourcePath, destPath) {
   const buf = fs.readFileSync(sourcePath);
+  return writeTextureBuffer(buf, destPath);
+}
+
+function writeTextureBuffer(buf, destPath) {
   if (!isPng(buf)) throw new Error("Нужен файл PNG (скин 64×64 / 64×32 или плащ 64×32)");
   if (buf.length > 2 * 1024 * 1024) throw new Error("Файл слишком большой (макс. 2 МБ)");
   ensureDir(path.dirname(destPath));
   fs.writeFileSync(destPath, buf);
   return destPath;
+}
+
+function pngDataUrl(buf) {
+  return `data:image/png;base64,${Buffer.from(buf).toString("base64")}`;
+}
+
+function httpGetBuffer(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error("Too many redirects"));
+    const proto = String(url).startsWith("https") ? https : http;
+    const req = proto.get(url, { headers: { "User-Agent": "AnLaunch/1.0.3", Accept: "*/*" } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const next = res.headers.location.startsWith("http")
+          ? res.headers.location
+          : new URL(res.headers.location, url).href;
+        res.resume();
+        return resolve(httpGetBuffer(next, redirects + 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+    });
+    req.on("error", reject);
+    req.setTimeout(12000, () => {
+      req.destroy();
+      reject(new Error("timeout"));
+    });
+  });
+}
+
+async function fetchSkinPng(username) {
+  const name = String(username || "").trim();
+  if (!/^[a-zA-Z0-9_]{1,16}$/.test(name)) throw new Error("Некорректный ник");
+  const urls = [];
+  try {
+    const raw = await httpGetBuffer(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`);
+    const profile = JSON.parse(raw.toString("utf8"));
+    if (profile && profile.id) {
+      const sess = JSON.parse(
+        (await httpGetBuffer(`https://sessionserver.mojang.com/session/minecraft/profile/${profile.id}`)).toString("utf8")
+      );
+      const tex = (sess.properties || []).find((p) => p.name === "textures");
+      if (tex && tex.value) {
+        const data = JSON.parse(Buffer.from(tex.value, "base64").toString("utf8"));
+        const skinUrl = data && data.textures && data.textures.SKIN && data.textures.SKIN.url;
+        if (skinUrl) urls.push(skinUrl);
+      }
+    }
+  } catch {}
+  urls.push(
+    `http://skinsystem.ely.by/skins/${encodeURIComponent(name)}.png`,
+    `https://mc-heads.net/skin/${encodeURIComponent(name)}`,
+    `https://minotar.net/skin/${encodeURIComponent(name)}`,
+    `https://api.mineatar.io/skin/${encodeURIComponent(name)}`
+  );
+  let last;
+  for (const u of urls) {
+    try {
+      const buf = await httpGetBuffer(u);
+      if (isPng(buf) && buf.length > 200) return buf;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last || new Error(`Скин «${name}» не найден`);
 }
 
 function getKeyPair(userData) {
@@ -123,6 +196,15 @@ function handle(req, res) {
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const p = url.pathname.replace(/\/+$/, "") || "/";
 
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+    });
+    return res.end();
+  }
+
   if (req.method === "GET" && (p === "/" || p === "/api")) {
     const pub = (keyPair && keyPair.publicKey) || "";
     return sendJson(res, 200, {
@@ -144,11 +226,18 @@ function handle(req, res) {
     return current.capePath ? sendFile(res, current.capePath) : (res.writeHead(404), res.end());
   }
 
-  if (p.startsWith("/sessionserver/session/minecraft/profile/")) {
+  if (
+    p.startsWith("/sessionserver/session/minecraft/profile/") ||
+    p.startsWith("/session/minecraft/profile/") ||
+    p.startsWith("/sessionserver/session/minecraft/profile")
+  ) {
     return sendJson(res, 200, signedProfile());
   }
 
-  if (p === "/sessionserver/session/minecraft/hasJoined") {
+  if (
+    p === "/sessionserver/session/minecraft/hasJoined" ||
+    p === "/session/minecraft/hasJoined"
+  ) {
     return sendJson(res, 200, signedProfile());
   }
 
@@ -355,6 +444,9 @@ async function applyLaunchTextures(config, dirs, javaArgs, log) {
 
 module.exports = {
   copyTextureFile,
+  writeTextureBuffer,
+  pngDataUrl,
+  fetchSkinPng,
   applyLaunchTextures,
   isPng,
 };

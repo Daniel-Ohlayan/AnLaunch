@@ -97,7 +97,16 @@ export interface ElectronAPI {
     accountId: string;
     kind: "skin" | "cape";
     sourcePath: string;
-  }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  }) => Promise<{ success: boolean; path?: string; dataUrl?: string; error?: string }>;
+  saveAccountTextureBytes: (data: {
+    accountId: string;
+    kind: "skin" | "cape";
+    base64: string;
+  }) => Promise<{ success: boolean; path?: string; dataUrl?: string; error?: string }>;
+  fetchPlayerSkin: (data: {
+    accountId: string;
+    username: string;
+  }) => Promise<{ success: boolean; path?: string; dataUrl?: string; error?: string }>;
   removeAccountTexture: (data: {
     accountId: string;
     kind: "skin" | "cape";

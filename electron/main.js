@@ -335,15 +335,44 @@ ipcMain.handle("open-file-dialog", async (_event, { title, filters, multiple }) 
 });
 
 // Прочитать локальный файл как data URL (для превью)
+function textureDest(accountId, kind) {
+  const id = String(accountId || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "");
+  if (!id) throw new Error("Нет аккаунта");
+  const name = kind === "cape" ? "cape.png" : "skin.png";
+  return { id, dest: path.join(app.getPath("userData"), "textures", id, name) };
+}
+
 ipcMain.handle("save-account-texture", async (_event, { accountId, kind, sourcePath }) => {
   try {
-    const { copyTextureFile } = require("./skins");
-    const id = String(accountId || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "");
-    if (!id) return { success: false, error: "Нет аккаунта" };
-    const name = kind === "cape" ? "cape.png" : "skin.png";
-    const dest = path.join(app.getPath("userData"), "textures", id, name);
+    const { copyTextureFile, pngDataUrl } = require("./skins");
+    const { dest } = textureDest(accountId, kind);
     copyTextureFile(sourcePath, dest);
-    return { success: true, path: dest };
+    const buf = fs.readFileSync(dest);
+    return { success: true, path: dest, dataUrl: pngDataUrl(buf) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle("save-account-texture-bytes", async (_event, { accountId, kind, base64 }) => {
+  try {
+    const { writeTextureBuffer, pngDataUrl } = require("./skins");
+    const { dest } = textureDest(accountId, kind);
+    const buf = Buffer.from(String(base64 || ""), "base64");
+    writeTextureBuffer(buf, dest);
+    return { success: true, path: dest, dataUrl: pngDataUrl(buf) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle("fetch-player-skin", async (_event, { accountId, username }) => {
+  try {
+    const { fetchSkinPng, writeTextureBuffer, pngDataUrl } = require("./skins");
+    const { dest } = textureDest(accountId, "skin");
+    const buf = await fetchSkinPng(username);
+    writeTextureBuffer(buf, dest);
+    return { success: true, path: dest, dataUrl: pngDataUrl(buf) };
   } catch (e) {
     return { success: false, error: e.message };
   }

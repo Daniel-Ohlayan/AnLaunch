@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Настройки главного экрана
   saveAccountTexture: (data) => ipcRenderer.invoke("save-account-texture", data),
+  saveAccountTextureBytes: (data) => ipcRenderer.invoke("save-account-texture-bytes", data),
+  fetchPlayerSkin: (data) => ipcRenderer.invoke("fetch-player-skin", data),
   removeAccountTexture: (data) => ipcRenderer.invoke("remove-account-texture", data),
   openFileDialog: (data) => ipcRenderer.invoke("open-file-dialog", data),
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke("read-file-as-data-url", filePath),
