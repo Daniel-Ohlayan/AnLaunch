@@ -16,13 +16,18 @@ function getProto(url) {
   return url.startsWith("https") ? https : http;
 }
 
+const HTTP_HEADERS = { "User-Agent": "AnLaunch/1.0.3", Accept: "*/*" };
+
+function httpGet(url, callback) {
+  return getProto(url).get(url, { headers: HTTP_HEADERS }, callback);
+}
+
 function downloadFile(url, destPath, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("Too many redirects"));
     ensureDir(path.dirname(destPath));
     const file = fs.createWriteStream(destPath);
-    getProto(url)
-      .get(url, (res) => {
+    httpGet(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           file.close();
           fs.unlink(destPath, () => {});
@@ -47,8 +52,7 @@ function downloadFile(url, destPath, redirects = 0) {
 function downloadJSON(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("Too many redirects"));
-    getProto(url)
-      .get(url, (res) => {
+    httpGet(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return resolve(downloadJSON(res.headers.location, redirects + 1));
         }
@@ -262,6 +266,12 @@ async function loadVersionDetails(versionId, versionsDir, log) {
       if (!details.logging && parent.logging) {
         details.logging = parent.logging;
       }
+      if (!details.minecraftArguments && parent.minecraftArguments) {
+        details.minecraftArguments = parent.minecraftArguments;
+      }
+      if (!details.mainClass && parent.mainClass) {
+        details.mainClass = parent.mainClass;
+      }
     }
     return details;
   }
@@ -349,7 +359,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
 
   try {
     const { findAllJavaInstalls, getRequiredJavaVersion, pickJavaForVersion, findJavaByVersion, getJavaMajorVersion, maxJavaForGame } = require("./javaFinder");
-    const requiredJava = getRequiredJavaVersion(details);
+    const requiredJava = getRequiredJavaVersion(details, version);
     const maxJava = maxJavaForGame(loader, version, requiredJava);
     const installs = findAllJavaInstalls();
 
@@ -464,46 +474,51 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     const resolved = resolveLibraryJar(librariesDir, lib);
     if (resolved) {
       classpath.push(resolved);
-    } else if (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path) {
-      const libPath = path.join(librariesDir, lib.downloads.artifact.path);
-      if (lib.downloads.artifact.url) {
-        downloadQueue.push({ url: lib.downloads.artifact.url, path: libPath, libName: lib.name, type: "lib" });
-      } else if (lib.name) {
-        const m = mavenCoordPath(lib.name);
-        if (m) {
-          const alt = path.join(librariesDir, m);
-          if (fs.existsSync(alt)) classpath.push(alt);
-        }
-      }
-    } else if (lib.url && lib.name) {
-      const parts = lib.name.split(":");
-      if (parts.length >= 3) {
-        const [group, artifact, version] = parts;
-        const groupPath = group.replace(/\./g, "/");
-        const fileName = `${artifact}-${version}.jar`;
-        const mavenPath = `${groupPath}/${artifact}/${version}/${fileName}`;
-        const libPath = path.join(librariesDir, mavenPath);
+    } else {
+      const rel =
+        (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.path) || mavenCoordPath(lib.name);
+      if (rel) {
+        const libPath = path.join(librariesDir, rel);
         if (fs.existsSync(libPath)) {
           classpath.push(libPath);
         } else {
-          downloadQueue.push({ url: lib.url + mavenPath, path: libPath, libName: lib.name, type: "lib" });
+          const mirrors = libraryDownloadUrls(lib, rel);
+          if (mirrors.length) {
+            downloadQueue.push({ url: mirrors[0], path: libPath, libName: lib.name, type: "lib", mirrors: mirrors.slice(1) });
+          }
         }
       }
     }
 
-    if (lib.downloads && lib.downloads.classifiers) {
-      const currentOS = getCurrentOS();
-      const nativeKey =
-        lib.natives && lib.natives[currentOS]
-          ? lib.natives[currentOS].replace("${arch}", os.arch().includes("64") ? "64" : "32")
-          : null;
-      if (nativeKey && lib.downloads.classifiers[nativeKey]) {
-        const na = lib.downloads.classifiers[nativeKey];
-        const nativePath = path.join(librariesDir, na.path);
-        if (fs.existsSync(nativePath)) {
-          nativeFiles.push(nativePath);
-        } else {
-          downloadQueue.push({ url: na.url, path: nativePath, libName: lib.name, type: "native" });
+    const currentOS = getCurrentOS();
+    const nativeKey =
+      lib.natives && lib.natives[currentOS]
+        ? String(lib.natives[currentOS]).replace("${arch}", os.arch().includes("64") ? "64" : "32")
+        : null;
+    if (nativeKey) {
+      let nativePath = null;
+      let nativeUrl = null;
+      const classified = lib.downloads && lib.downloads.classifiers && lib.downloads.classifiers[nativeKey];
+      if (classified) {
+        nativePath = path.join(librariesDir, classified.path);
+        nativeUrl = classified.url;
+      } else {
+        const nrel = mavenCoordPath(`${lib.name}:${nativeKey}`);
+        if (nrel) {
+          nativePath = path.join(librariesDir, nrel);
+          nativeUrl = (lib.url || "https://libraries.minecraft.net/") + nrel;
+        }
+      }
+      if (nativePath) {
+        if (fs.existsSync(nativePath)) nativeFiles.push(nativePath);
+        else if (nativeUrl) {
+          downloadQueue.push({
+            url: nativeUrl,
+            path: nativePath,
+            libName: `${lib.name}:${nativeKey}`,
+            type: "native",
+            mirrors: libraryDownloadUrls({ ...lib, downloads: null }, mavenCoordPath(`${lib.name}:${nativeKey}`) || ""),
+          });
         }
       }
     }
@@ -519,7 +534,19 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
       await Promise.all(
         batch.map(async (item) => {
           try {
-            await downloadFile(item.url, item.path);
+            let got = false;
+            let lastErr;
+            const tries = [item.url, ...(item.mirrors || [])].filter(Boolean);
+            for (const u of tries) {
+              try {
+                await downloadFile(u, item.path);
+                got = true;
+                break;
+              } catch (e) {
+                lastErr = e;
+              }
+            }
+            if (!got) throw lastErr || new Error("все зеркала недоступны");
             if (item.type === "lib") classpath.push(item.path);
             else if (item.type === "native") nativeFiles.push(item.path);
           } catch (e) {
@@ -572,7 +599,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     /FMLTweaker/i.test(details.minecraftArguments || "") ||
     /launchwrapper/i.test(String(details.mainClass || ""));
   if (needsFml) {
-    const tweaker = ensureLegacyForgeClasspath(sharedDir, classpath, log);
+    const tweaker = ensureLegacyForgeClasspath(sharedDir, classpath, log, version);
     if (!tweaker) {
       throw new Error(
         "Не найден forge-*-universal.jar (класс FMLTweaker). " +
@@ -764,6 +791,10 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
   const extraIgnore = [];
   if (fs.existsSync(clientJarPath)) extraIgnore.push(path.basename(clientJarPath));
   if (fs.existsSync(versionJarPath)) extraIgnore.push(path.basename(versionJarPath));
+  for (const c of classpath) {
+    const b = path.basename(c);
+    if (/forge|neoforge|client-extra|bootstraplauncher|asm-/i.test(b)) extraIgnore.push(b);
+  }
   patchIgnoreList(jvmArgs, extraIgnore);
 
   // Пользовательские JVM-аргументы из настроек — добавляются до mainClass
@@ -841,6 +872,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     detached: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, JAVA_TOOL_OPTIONS: "" },
   });
 
   let started = false;

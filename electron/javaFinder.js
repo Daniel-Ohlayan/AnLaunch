@@ -127,11 +127,23 @@ function collectJavaHomes(root, exeName, out, depth) {
 }
 
 // Достаёт требуемую major-версию Java из details.javaVersion (version.json Mojang).
-function getRequiredJavaVersion(details) {
+function inferJavaFromMc(mcVersion) {
+  const ver = String(mcVersion || "");
+  if (/^26(\.|$)/.test(ver)) return 25;
+  const parts = ver.split(".").map((n) => parseInt(n, 10));
+  const minor = parts[0] === 1 ? parts[1] || 0 : parts[0] || 0;
+  if (!Number.isFinite(minor) || minor <= 0) return 17;
+  if (minor >= 21) return 21;
+  if (minor >= 18) return 17;
+  if (minor === 17) return 16;
+  return 8;
+}
+
+function getRequiredJavaVersion(details, mcVersion) {
   if (details && details.javaVersion && details.javaVersion.majorVersion) {
     return details.javaVersion.majorVersion;
   }
-  return 17; // разумное значение по умолчанию для старых версий без этого поля
+  return inferJavaFromMc(mcVersion);
 }
 
 // Ищет установленную Java конкретной major-версии (например 8) среди кандидатов.
@@ -183,6 +195,7 @@ module.exports = {
   findAllJavaInstalls,
   getJavaMajorVersion,
   getRequiredJavaVersion,
+  inferJavaFromMc,
   pickJavaForVersion,
   findJavaByVersion,
   maxJavaForGame,

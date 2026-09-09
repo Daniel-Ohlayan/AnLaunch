@@ -11,6 +11,12 @@ function getProto(url) {
   return url.startsWith("https") ? https : http;
 }
 
+const HTTP_HEADERS = { "User-Agent": "AnLaunch/1.0.3", Accept: "*/*" };
+
+function httpGet(url, callback) {
+  return getProto(url).get(url, { headers: HTTP_HEADERS }, callback);
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -34,8 +40,7 @@ function downloadFile(url, destPath, redirects = 0) {
     if (redirects > 5) return reject(new Error("Too many redirects"));
     ensureDir(path.dirname(destPath));
     const file = fs.createWriteStream(destPath);
-    getProto(url)
-      .get(url, (res) => {
+    httpGet(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           file.close();
           fs.unlink(destPath, () => {});
@@ -60,8 +65,7 @@ function downloadFile(url, destPath, redirects = 0) {
 function downloadJSON(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("Too many redirects"));
-    getProto(url)
-      .get(url, (res) => {
+    httpGet(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return resolve(downloadJSON(res.headers.location, redirects + 1));
         }
@@ -83,8 +87,7 @@ function downloadJSON(url, redirects = 0) {
 function downloadText(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("Too many redirects"));
-    getProto(url)
-      .get(url, (res) => {
+    httpGet(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return resolve(downloadText(res.headers.location, redirects + 1));
         }
@@ -363,8 +366,9 @@ function isLibrariesForgeJar(jarPath) {
   );
 }
 
-function findForgeJars(librariesDir) {
+function findForgeJars(librariesDir, mcVersion) {
   const out = [];
+  const mc = mcVersion ? String(mcVersion) : "";
   const roots = [
     path.join(librariesDir, "net", "minecraftforge", "forge"),
     path.join(librariesDir, "net", "minecraftforge", "fml"),
@@ -381,7 +385,11 @@ function findForgeJars(librariesDir) {
     for (const e of entries) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) walk(full, depth - 1);
-      else if (/\.jar$/i.test(e.name) && !/installer/i.test(e.name)) out.push(full);
+      else if (/\.jar$/i.test(e.name) && !/installer/i.test(e.name)) {
+        const norm = full.replace(/\\/g, "/");
+        if (mc && /\/minecraftforge\/forge\//i.test(norm) && !norm.includes(mc)) continue;
+        out.push(full);
+      }
     }
   }
   for (const root of roots) walk(root, 4);
@@ -448,7 +456,8 @@ async function runForgeInstaller(javaBin, installerPath, targetDir, log) {
 
 // Превращает groupId:artifactId:version в Maven-путь
 function mavenPath(name) {
-  const parts = name.split(":");
+  const raw = String(name || "").split("@")[0];
+  const parts = raw.split(":");
   if (parts.length < 3) return null;
   const [group, artifact, version, classifier] = parts;
   const groupPath = group.replace(/\./g, "/");
@@ -790,8 +799,27 @@ async function downloadVersionLibraries(versionData, librariesDir, log) {
       } catch {
         /* 404 — часто лежит внутри installer */
       }
-    } else if (lib.name && lib.url) {
-      await downloadMavenLib(lib, librariesDir, log);
+    } else if (lib.name) {
+      const m = mavenPath(lib.name);
+      if (!m) continue;
+      const libPath = path.join(librariesDir, m.path);
+      if (fs.existsSync(libPath)) continue;
+      const bases = [];
+      if (lib.url) bases.push(lib.url);
+      bases.push("https://libraries.minecraft.net/", "https://maven.minecraftforge.net/", "https://maven.neoforged.net/releases/");
+      let ok = false;
+      for (const base of bases) {
+        const root = base.endsWith("/") ? base : `${base}/`;
+        try {
+          await downloadFile(root + m.path, libPath);
+          downloaded++;
+          ok = true;
+          break;
+        } catch {
+          /* следующее зеркало */
+        }
+      }
+      if (!ok) log(`Не скачано: ${lib.name}`);
     }
   }
   log(`Докачано библиотек: ${downloaded}`);
