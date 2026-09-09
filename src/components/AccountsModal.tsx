@@ -228,7 +228,6 @@ export default function AccountsModal({
   function handleSelect(account: Account) {
     setActiveAccount(account.id);
     onChange(account);
-    onClose();
   }
 
   function performDelete(account: Account) {
@@ -282,100 +281,15 @@ export default function AccountsModal({
         </div>
 
         {/* Body */}
-        <div className="max-h-[500px] overflow-y-auto p-5">
-          {/* Microsoft login */}
-          <button
-            onClick={handleMicrosoftLogin}
-            disabled={msLoading}
-            className="mb-2 flex w-full items-center justify-center gap-3 rounded-xl bg-[#2f2f9e] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#3a3ab5] disabled:opacity-60"
-          >
-            <svg viewBox="0 0 23 23" className="h-5 w-5">
-              <rect x="1" y="1" width="10" height="10" fill="#f25022" />
-              <rect x="12" y="1" width="10" height="10" fill="#7fba00" />
-              <rect x="1" y="12" width="10" height="10" fill="#00a4ef" />
-              <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
-            </svg>
-            {msLoading ? msStatus || "Вход…" : "Войти через Microsoft"}
-          </button>
+        <div className="max-h-[560px] overflow-y-auto p-5">
+          <div className="mb-3 text-sm font-medium text-white/80">Выберите аккаунт</div>
 
-          <button
-            onClick={() => {
-              setShowBrowser(!showBrowser);
-              if (!showBrowser) handleOpenBrowser();
-            }}
-            disabled={msLoading}
-            className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-white/60 transition hover:bg-white/[0.06]"
-          >
-            Войти через браузер (если окно не открывается)
-          </button>
-
-          {showBrowser && (
-            <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
-              <p className="mb-2 text-xs leading-relaxed text-white/55">
-                1. Войдите в Microsoft в открывшемся браузере.
-                2. После входа откроется пустая страница — скопируйте её адрес
-                (начинается с login.live.com/oauth20_desktop.srf) и вставьте сюда.
-                Если login.live.com не открывается, включите VPN.
-              </p>
-              {browserUrl && (
-                <button
-                  onClick={() => navigator.clipboard.writeText(browserUrl).catch(() => {})}
-                  className="mb-2 text-[11px] text-blue-300 underline"
-                >
-                  Скопировать ссылку входа
-                </button>
-              )}
-              <input
-                value={pasteUrl}
-                onChange={(e) => setPasteUrl(e.target.value)}
-                placeholder="Вставьте ссылку с code=…"
-                className="mb-2 w-full rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-              />
-              <button
-                onClick={handlePasteCode}
-                disabled={msLoading || !pasteUrl.trim()}
-                className="w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300 disabled:opacity-50"
-              >
-                {msLoading ? msStatus || "Вход…" : "Продолжить вход"}
-              </button>
-            </div>
-          )}
-
-          <div className="mb-3 flex items-center gap-3 text-[11px] uppercase tracking-wider text-white/25">
-            <span className="h-px flex-1 bg-white/[0.08]" />
-            или оффлайн-аккаунт
-            <span className="h-px flex-1 bg-white/[0.08]" />
-          </div>
-
-          {/* Create */}
-          <div className="mb-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-            <div className="mb-2 text-sm font-medium text-white/70">Добавить оффлайн-аккаунт</div>
-            <div className="flex gap-2">
-              <input
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                placeholder="Введите ник…"
-                maxLength={16}
-                className="flex-1 rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-              />
-              <button
-                onClick={handleCreate}
-                className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300"
-              >
-                Добавить
-              </button>
-            </div>
-            {error && <div className="mt-2 text-xs text-red-400">⚠ {error}</div>}
-          </div>
-
-          {/* List */}
           {accounts.length === 0 ? (
-            <div className="py-10 text-center text-sm text-white/40">
-              Нет аккаунтов. Создайте первый!
+            <div className="mb-4 py-6 text-center text-sm text-white/40">
+              Нет аккаунтов. Добавьте оффлайн-ник или войдите через Microsoft.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="mb-4 space-y-2">
               {accounts.map((account) => {
                 const isActive = activeAccount?.id === account.id;
                 const isEditing = editingId === account.id;
@@ -384,6 +298,12 @@ export default function AccountsModal({
                 return (
                   <div
                     key={account.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => !isConfirming && !isEditing && handleSelect(account)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !isConfirming && !isEditing) handleSelect(account);
+                    }}
                     className={`rounded-xl border p-3 transition ${
                       isActive
                         ? "border-emerald-400/40 bg-emerald-500/10"
@@ -408,32 +328,33 @@ export default function AccountsModal({
                             className="w-full rounded border border-emerald-400/50 bg-black/30 px-2 py-1 text-sm text-white outline-none"
                           />
                         ) : (
-                          <button
-                            onClick={() => handleSelect(account)}
-                            className="block truncate text-left text-sm font-semibold text-white transition hover:text-emerald-300"
-                          >
+                          <div className="truncate text-sm font-semibold text-white">
                             {account.username}
-                          </button>
+                          </div>
                         )}
                         <div className="truncate text-xs text-white/40">
                           {account.type === "microsoft"
                             ? "🪟 Microsoft"
                             : account.type === "premium"
                               ? "🔑 Лицензия"
-                              : "🔓 Оффлайн"}{" "}
-                          ·{" "}
-                          <span className="font-mono text-[10px]">{account.uuid.slice(0, 13)}…</span>
+                              : "🔓 Оффлайн"}
                         </div>
                       </div>
 
-                      {isActive && !isConfirming && (
-                        <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-1 text-[10px] font-semibold text-emerald-300">
-                          <CheckIcon className="h-3 w-3" /> Активен
-                        </span>
-                      )}
-
                       {!isConfirming && (
-                        <div className="flex gap-1">
+                        <div className="flex shrink-0 items-center gap-1">
+                          {isActive ? (
+                            <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-1 text-[10px] font-semibold text-emerald-300">
+                              <CheckIcon className="h-3 w-3" /> Активен
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleSelect(account)}
+                              className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-[#06070a] hover:bg-emerald-300"
+                            >
+                              Выбрать
+                            </button>
+                          )}
                           {isEditing ? (
                             <button
                               onClick={handleSaveEdit}
@@ -464,9 +385,62 @@ export default function AccountsModal({
                       )}
                     </div>
 
-                    {/* Inline delete confirmation */}
+                    {!isConfirming && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.05] pt-3">
+                        <button
+                          onClick={() => pickTexture(account, "skin")}
+                          className="rounded-lg bg-white/[0.08] px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:bg-white/[0.12] hover:text-white"
+                        >
+                          {account.skinPath ? "Сменить скин" : "Скин PNG"}
+                        </button>
+                        {account.skinPath && (
+                          <button
+                            onClick={() => clearTexture(account, "skin")}
+                            className="text-[11px] text-white/35 hover:text-red-300"
+                          >
+                            сбросить
+                          </button>
+                        )}
+                        <button
+                          onClick={() => pickTexture(account, "cape")}
+                          className="rounded-lg bg-white/[0.08] px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:bg-white/[0.12] hover:text-white"
+                        >
+                          {account.capePath ? "Сменить плащ" : "Плащ PNG"}
+                        </button>
+                        {account.capePath && (
+                          <button
+                            onClick={() => clearTexture(account, "cape")}
+                            className="text-[11px] text-white/35 hover:text-red-300"
+                          >
+                            сбросить
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            const updated = updateAccountTextures(account.id, { slim: !account.slim });
+                            setAccounts(getAllAccounts());
+                            if (updated && activeAccount?.id === account.id) onChange(updated);
+                          }}
+                          className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium ${
+                            account.slim ? "bg-emerald-500/20 text-emerald-200" : "bg-white/[0.06] text-white/55"
+                          }`}
+                          title="Модель рук: Alex (slim) или Steve"
+                        >
+                          {account.slim ? "Alex" : "Steve"}
+                        </button>
+                        {previews[account.id]?.cape && (
+                          <img
+                            alt="Плащ"
+                            src={previews[account.id].cape}
+                            className="ml-auto h-8 w-5 rounded-sm border border-white/10 object-cover"
+                            style={{ imageRendering: "pixelated" }}
+                          />
+                        )}
+                      </div>
+                    )}
+
                     {isConfirming && (
-                      <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
+                      <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2">
                         <span className="text-xs text-red-200">Удалить «{account.username}»?</span>
                         <div className="flex gap-2">
                           <button
@@ -487,6 +461,85 @@ export default function AccountsModal({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {error && <div className="mb-3 text-xs text-red-400">⚠ {error}</div>}
+
+          <div className="mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+            <div className="mb-2 text-sm font-medium text-white/70">Добавить оффлайн-аккаунт</div>
+            <div className="flex gap-2">
+              <input
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                placeholder="Введите ник…"
+                maxLength={16}
+                className="flex-1 rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
+              />
+              <button
+                onClick={handleCreate}
+                className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300"
+              >
+                Добавить
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={handleMicrosoftLogin}
+            disabled={msLoading}
+            className="mb-2 flex w-full items-center justify-center gap-3 rounded-xl bg-[#2f2f9e] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#3a3ab5] disabled:opacity-60"
+          >
+            <svg viewBox="0 0 23 23" className="h-5 w-5">
+              <rect x="1" y="1" width="10" height="10" fill="#f25022" />
+              <rect x="12" y="1" width="10" height="10" fill="#7fba00" />
+              <rect x="1" y="12" width="10" height="10" fill="#00a4ef" />
+              <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
+            </svg>
+            {msLoading ? msStatus || "Вход…" : "Войти через Microsoft"}
+          </button>
+
+          <button
+            onClick={() => {
+              setShowBrowser(!showBrowser);
+              if (!showBrowser) handleOpenBrowser();
+            }}
+            disabled={msLoading}
+            className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-white/60 transition hover:bg-white/[0.06]"
+          >
+            Войти через браузер (если окно не открывается)
+          </button>
+
+          {showBrowser && (
+            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+              <p className="mb-2 text-xs leading-relaxed text-white/55">
+                1. Войдите в Microsoft в открывшемся браузере.
+                2. После входа откроется пустая страница — скопируйте её адрес
+                (начинается с login.live.com/oauth20_desktop.srf) и вставьте сюда.
+                Если login.live.com не открывается, включите VPN.
+              </p>
+              {browserUrl && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(browserUrl).catch(() => {})}
+                  className="mb-2 text-[11px] text-blue-300 underline"
+                >
+                  Скопировать ссылку входа
+                </button>
+              )}
+              <input
+                value={pasteUrl}
+                onChange={(e) => setPasteUrl(e.target.value)}
+                placeholder="Вставьте ссылку с code=…"
+                className="mb-2 w-full rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-emerald-400/50"
+              />
+              <button
+                onClick={handlePasteCode}
+                disabled={msLoading || !pasteUrl.trim()}
+                className="w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-[#06070a] transition hover:bg-emerald-300 disabled:opacity-50"
+              >
+                {msLoading ? msStatus || "Вход…" : "Продолжить вход"}
+              </button>
             </div>
           )}
         </div>

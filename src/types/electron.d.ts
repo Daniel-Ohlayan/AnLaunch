@@ -93,6 +93,15 @@ export interface ElectronAPI {
     success: boolean;
     paths?: string[];
   }>;
+  saveAccountTexture: (data: {
+    accountId: string;
+    kind: "skin" | "cape";
+    sourcePath: string;
+  }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  removeAccountTexture: (data: {
+    accountId: string;
+    kind: "skin" | "cape";
+  }) => Promise<{ success: boolean }>;
   readFileAsDataUrl: (filePath: string) => Promise<{
     success: boolean;
     dataUrl?: string;

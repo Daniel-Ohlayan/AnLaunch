@@ -980,13 +980,29 @@ function collectCrashText(gameDir) {
 
 // Безопасно достаёт требуемую версию Java из details (не бросает исключений).
 function mavenCoordPath(name) {
-  const parts = String(name || "").split(":");
+  const parts = String(name || "").split("@")[0].split(":");
   if (parts.length < 3) return null;
   const [group, artifact, ver, classifier] = parts;
   const fileName = classifier
     ? `${artifact}-${ver}-${classifier}.jar`
     : `${artifact}-${ver}.jar`;
   return `${group.replace(/\./g, "/")}/${artifact}/${ver}/${fileName}`;
+}
+
+function libraryDownloadUrls(lib, rel) {
+  if (!rel) return [];
+  const urls = [];
+  const art = lib && lib.downloads && lib.downloads.artifact;
+  if (art && art.url) urls.push(art.url);
+  let base = (lib && lib.url) || "";
+  if (base && !base.endsWith("/")) base += "/";
+  if (base) urls.push(base + rel);
+  urls.push(
+    "https://libraries.minecraft.net/" + rel,
+    "https://maven.minecraftforge.net/" + rel,
+    "https://maven.neoforged.net/releases/" + rel
+  );
+  return [...new Set(urls)];
 }
 
 function applyClasspathToJvmArgs(jvmArgs, finalCp) {
