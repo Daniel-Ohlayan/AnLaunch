@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ModHit, ModLoader, ProjectType, ProjectVersion } from "../lib/modrinth";
 import {
   PROJECT_TYPE_LABELS,
@@ -17,6 +18,12 @@ function licenseName(license: ModrinthProject["license"]): string {
   if (!license) return "";
   if (typeof license === "string") return license;
   return license.name || license.id || "";
+}
+
+function typeBadge(kind?: string) {
+  if (kind === "beta") return "bg-amber-400/15 text-amber-200";
+  if (kind === "alpha") return "bg-red-400/15 text-red-200";
+  return "bg-emerald-400/15 text-emerald-200";
 }
 
 function MdBody({ text }: { text: string }) {
@@ -182,15 +189,15 @@ export default function ModDetailModal({
           ? "shader"
           : projectType;
 
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 p-4 backdrop-blur-md" onClick={onClose}>
+  const ui = (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[90vh] w-full max-w-4xl animate-scale-in flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#141419] shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#141419] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-4 border-b border-white/[0.06] p-5">
           {hit.icon_url ? (
-            <img src={hit.icon_url} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" />
+            <img src={hit.icon_url} alt="" className="h-16 w-16 shrink-0 rounded-xl object-contain" />
           ) : (
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-white/50">
               <CubeIcon className="h-7 w-7" />
@@ -223,25 +230,39 @@ export default function ModDetailModal({
           ) : error ? (
             <div className="p-5 text-sm text-red-300">⚠ {error}</div>
           ) : (
-            <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
+            <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
               <div className="space-y-4 p-5">
                 {hero && (
-                  <img src={hero} alt="" className="max-h-72 w-full rounded-xl object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setLightbox(hero)}
+                    className="block w-full rounded-xl bg-[#0c0d12] p-1"
+                    title="Открыть в полном размере"
+                  >
+                    <img
+                      src={hero}
+                      alt=""
+                      className="mx-auto max-h-[22rem] w-auto max-w-full object-contain"
+                    />
+                  </button>
                 )}
                 {gallery.length > 1 && (
                   <div className="flex gap-2 overflow-x-auto pb-1">
-                    {gallery.map((g) => (
-                      <button
-                        key={g.url}
-                        type="button"
-                        onClick={() => setHero(g.url)}
-                        className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${
-                          hero === g.url ? "border-emerald-400" : "border-white/10"
-                        }`}
-                      >
-                        <img src={g.url} alt={g.title || ""} className="h-full w-full object-cover" />
-                      </button>
-                    ))}
+                    {gallery.map((g) => {
+                      const src = fullImageUrl(g.raw_url || g.url);
+                      return (
+                        <button
+                          key={g.url}
+                          type="button"
+                          onClick={() => setHero(src)}
+                          className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${
+                            hero === src ? "border-emerald-400" : "border-white/10"
+                          }`}
+                        >
+                          <img src={src} alt={g.title || ""} className="h-full w-full object-cover" />
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <p className="text-sm text-white/70">{project?.description || hit.description}</p>
@@ -257,9 +278,9 @@ export default function ModDetailModal({
                 <MdBody text={project?.body || hit.description || "Описание отсутствует."} />
               </div>
 
-              <aside className="space-y-3 border-t border-white/[0.06] bg-black/20 p-4 lg:border-l lg:border-t-0">
-                <div className="text-xs font-semibold uppercase tracking-wider text-white/35">Версия файла</div>
-                <label className="flex items-center gap-2 text-[11px] text-white/50">
+              <aside className="flex min-h-0 flex-col border-t border-white/[0.06] bg-black/20 p-4 lg:border-l lg:border-t-0">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/35">Версия файла</div>
+                <label className="mb-3 flex items-center gap-2 text-[11px] text-white/50">
                   <input type="checkbox" checked={allVersions} onChange={(e) => setAllVersions(e.target.checked)} />
                   Показать все версии
                 </label>
@@ -268,26 +289,53 @@ export default function ModDetailModal({
                     Нет файла для {gameVersion} / {loaderLabel(loader)}. Включите «все версии» или смените профиль.
                   </div>
                 ) : (
-                  <select
-                    value={selected}
-                    onChange={(e) => setSelected(e.target.value)}
-                    className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-3 py-2 text-xs text-white outline-none"
-                  >
-                    {filtered.map((v) => (
-                      <option key={v.id} value={v.id} className="bg-[#141419]">
-                        {v.version_number} · {v.game_versions[0] || "?"} · {v.loaders.join("/") || "any"} · {v.version_type || "release"}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {current && (
-                  <div className="space-y-1 text-[11px] text-white/45">
-                    <div>Игра: {current.game_versions.slice(0, 8).join(", ")}</div>
-                    <div>Загрузчики: {current.loaders.join(", ") || "—"}</div>
-                    {file && <div>Файл: {file.filename} · {formatSize(file.size)}</div>}
+                  <div className="min-h-0 max-h-[22rem] space-y-1.5 overflow-y-auto pr-0.5">
+                    {filtered.map((v) => {
+                      const active = v.id === selected;
+                      const primary = v.files.find((f) => f.primary) || v.files[0];
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => setSelected(v.id)}
+                          className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
+                            active
+                              ? `${accent.border} ${accent.bg}`
+                              : "border-white/[0.06] bg-white/[0.03] hover:border-white/15 hover:bg-white/[0.05]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-semibold text-white">{v.version_number}</span>
+                            <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${typeBadge(v.version_type)}`}>
+                              {v.version_type || "release"}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {(v.game_versions.slice(0, 3).length ? v.game_versions.slice(0, 3) : ["—"]).map((gv) => (
+                              <span key={gv} className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-white/55">
+                                {gv}
+                              </span>
+                            ))}
+                            {v.loaders.map((l) => (
+                              <span key={l} className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] capitalize text-white/55">
+                                {l}
+                              </span>
+                            ))}
+                          </div>
+                          {primary && (
+                            <div className="mt-1 truncate text-[10px] text-white/35">{formatSize(primary.size)}</div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
-                <div className="flex flex-col gap-2 pt-1">
+                {current && file && (
+                  <div className="mt-3 truncate text-[11px] text-white/40" title={file.filename}>
+                    {file.filename}
+                  </div>
+                )}
+                <div className="mt-auto flex flex-col gap-2 pt-4">
                   {installed && !current ? (
                     <span className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300">
                       <CheckIcon className="h-4 w-4" /> Установлено
@@ -297,7 +345,7 @@ export default function ModDetailModal({
                       type="button"
                       disabled={installing || !current}
                       onClick={() => current && onInstall(current)}
-                      className={`flex items-center justify-center gap-2 rounded-lg ${accent.bgSolid} px-4 py-2 text-sm font-semibold text-[#06070a] transition disabled:opacity-50`}
+                      className={`flex items-center justify-center gap-2 rounded-lg ${accent.bgSolid} px-4 py-2.5 text-sm font-semibold text-[#06070a] transition disabled:opacity-50`}
                     >
                       {installing ? "Установка…" : installed ? "Поставить эту версию" : "Установить"}
                     </button>
@@ -333,7 +381,7 @@ export default function ModDetailModal({
       </div>
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/90 p-6"
           onClick={() => setLightbox(null)}
         >
           <img
@@ -346,4 +394,6 @@ export default function ModDetailModal({
       )}
     </div>
   );
+
+  return createPortal(ui, document.body);
 }
