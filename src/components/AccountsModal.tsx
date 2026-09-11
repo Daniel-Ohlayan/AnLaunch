@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Account } from "../lib/accounts";
 import {
   createAccount,
@@ -8,38 +8,41 @@ import {
   setActiveAccount,
   updateAccountTextures,
 } from "../lib/accounts";
+import { headIconDataUrl } from "../lib/skinPreview";
 import { CheckIcon, CloseIcon } from "./icons";
 import SkinViewer from "./SkinViewer";
 
 function McHead({ src, letter, active }: { src?: string; letter: string; active?: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [icon, setIcon] = useState<string | null>(null);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !src) return;
-    const img = new Image();
-    img.onload = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      const s = img.width / 64;
-      ctx.clearRect(0, 0, 40, 40);
-      ctx.drawImage(img, 8 * s, 8 * s, 8 * s, 8 * s, 0, 0, 40, 40);
-      ctx.drawImage(img, 40 * s, 8 * s, 8 * s, 8 * s, 0, 0, 40, 40);
+    if (!src) {
+      setIcon(null);
+      return;
+    }
+    let cancelled = false;
+    headIconDataUrl(src)
+      .then((url) => {
+        if (!cancelled) setIcon(url);
+      })
+      .catch(() => {
+        if (!cancelled) setIcon(null);
+      });
+    return () => {
+      cancelled = true;
     };
-    img.src = src;
   }, [src]);
   return (
     <div
       className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ${
-        src
+        icon
           ? "bg-[#1a1a22]"
           : active
             ? "bg-gradient-to-br from-emerald-400 to-teal-500"
             : "bg-gradient-to-br from-slate-500 to-slate-700"
       }`}
     >
-      {src ? (
-        <canvas ref={canvasRef} width={40} height={40} className="h-10 w-10" style={{ imageRendering: "pixelated" }} />
+      {icon ? (
+        <img alt="" src={icon} className="h-10 w-10" style={{ imageRendering: "pixelated" }} />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-sm font-bold text-white">{letter}</div>
       )}
@@ -638,7 +641,7 @@ export default function AccountsModal({
                     </button>
                   </div>
                   <div className="text-[10px] leading-relaxed text-white/35">
-                    Перетащите PNG сюда. «По нику» берёт скин с Mojang / Ely.by. На оффлайн он виден в игре после запуска.
+                    Перетащите PNG сюда. «По нику» берёт скин с Mojang / Ely.by. В игре скин ставится при запуске (оффлайн — сразу, Microsoft — через Mojang или локально).
                   </div>
                 </div>
               </div>

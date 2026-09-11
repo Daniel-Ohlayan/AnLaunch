@@ -133,6 +133,25 @@ function uuidNodash(uuid) {
   return String(uuid || "").replace(/-/g, "").toLowerCase();
 }
 
+function pngSize(buf) {
+  if (!isPng(buf) || buf.length < 24) return null;
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+
+function apiRoot() {
+  const pub = (keyPair && keyPair.publicKey) || "";
+  return {
+    signaturePublickey: pub,
+    skinDomains: ["127.0.0.1", "localhost"],
+    meta: {
+      serverName: "AnLaunch",
+      implementationName: "anlaunch",
+      implementationVersion: "1.0.3",
+      "feature.non_email_login": true,
+    },
+  };
+}
+
 function texturePayload() {
   const id = uuidNodash(current.uuid);
   const textures = {};
@@ -148,6 +167,7 @@ function texturePayload() {
     timestamp: Date.now(),
     profileId: id,
     profileName: current.username,
+    signatureRequired: true,
     textures,
   };
 }
@@ -205,18 +225,8 @@ function handle(req, res) {
     return res.end();
   }
 
-  if (req.method === "GET" && (p === "/" || p === "/api")) {
-    const pub = (keyPair && keyPair.publicKey) || "";
-    return sendJson(res, 200, {
-      signaturePublickey: pub,
-      skinDomains: ["127.0.0.1", "localhost"],
-      meta: {
-        serverName: "AnLaunch",
-        implementationName: "anlaunch",
-        implementationVersion: "1.0.3",
-        "feature.non_email_login": true,
-      },
-    });
+  if (req.method === "GET" && (p === "/" || p === "/api" || p === "/yggdrasil" || p === "/api/yggdrasil")) {
+    return sendJson(res, 200, apiRoot());
   }
 
   if (p === "/textures/skin.png" || p === "/textures/skin") {
@@ -226,18 +236,11 @@ function handle(req, res) {
     return current.capePath ? sendFile(res, current.capePath) : (res.writeHead(404), res.end());
   }
 
-  if (
-    p.startsWith("/sessionserver/session/minecraft/profile/") ||
-    p.startsWith("/session/minecraft/profile/") ||
-    p.startsWith("/sessionserver/session/minecraft/profile")
-  ) {
+  if (/\/profile\/[0-9a-f-]{32,36}$/i.test(p) || /\/minecraft\/profile$/i.test(p) && p.includes("session")) {
     return sendJson(res, 200, signedProfile());
   }
 
-  if (
-    p === "/sessionserver/session/minecraft/hasJoined" ||
-    p === "/session/minecraft/hasJoined"
-  ) {
+  if (p.endsWith("/hasJoined") || p.endsWith("/hasjoined")) {
     return sendJson(res, 200, signedProfile());
   }
 
@@ -337,8 +340,9 @@ async function ensureAuthlibInjector(sharedDir, log) {
   if (fs.existsSync(dest) && fs.statSync(dest).size > 10000) return dest;
   log("Скачивание authlib-injector (скины/плащи)…");
   const urls = [
-    "https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.5/authlib-injector-1.2.5.jar",
     "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/1.2.5/authlib-injector-1.2.5.jar",
+    "https://authlib-injector.yushi.moe/artifact/1.2.5/authlib-injector-1.2.5.jar",
+    "https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.5/authlib-injector-1.2.5.jar",
   ];
   let last;
   for (const url of urls) {
@@ -402,20 +406,22 @@ async function applyLaunchTextures(config, dirs, javaArgs, log) {
   const type = config.account && config.account.type;
   const isOffline = type !== "microsoft" && type !== "premium";
 
+  let mojangOk = false;
   if (!isOffline) {
     if (hasSkin && config.account && config.account.accessToken) {
       try {
         log("Загрузка скина на аккаунт Microsoft…");
         await uploadMojangSkin(config.account.accessToken, skinPath, !!config.slim);
         log("Скин загружен на аккаунт Mojang ✓");
+        mojangOk = true;
       } catch (e) {
         log(`Не удалось загрузить скин на Mojang: ${e.message}`);
       }
     }
     if (hasCape) {
-      log("Свой плащ на лицензии виден только с оффлайн-аккаунтом (Mojang не принимает чужие плащи).");
+      log("Свой плащ на лицензии через Mojang недоступен — показываю локально через authlib.");
     }
-    return javaArgs;
+    if (mojangOk && !hasCape) return javaArgs;
   }
 
   const { app } = (() => {
@@ -426,6 +432,13 @@ async function applyLaunchTextures(config, dirs, javaArgs, log) {
     }
   })();
   const userData = (app && app.getPath && app.getPath("userData")) || dirs.sharedDir;
+
+  if (hasSkin) {
+    try {
+      const sz = pngSize(fs.readFileSync(skinPath));
+      if (sz) log(`PNG скина: ${sz.w}×${sz.h}`);
+    } catch {}
+  }
 
   const uuid = config.account && config.account.uuid;
   const username = (config.account && config.account.username) || "Player";
@@ -438,8 +451,13 @@ async function applyLaunchTextures(config, dirs, javaArgs, log) {
   });
   const injector = await ensureAuthlibInjector(dirs.sharedDir, log);
   const api = `http://127.0.0.1:${port}`;
+  const prefetch = Buffer.from(JSON.stringify(apiRoot()), "utf8").toString("base64");
   log(`Скин/плащ: ${api} (${hasSkin ? "скин" : ""}${hasSkin && hasCape ? "+" : ""}${hasCape ? "плащ" : ""})`);
-  return [`-javaagent:${injector}=${api}`, ...javaArgs];
+  return [
+    `-javaagent:${injector}=${api}`,
+    `-Dauthlibinjector.yggdrasil.prefetched=${prefetch}`,
+    ...javaArgs,
+  ];
 }
 
 module.exports = {

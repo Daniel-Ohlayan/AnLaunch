@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { normalizeSkinDataUrl } from "../lib/skinPreview";
 
 function Face({
   src,
@@ -6,20 +7,14 @@ function Face({
   y,
   w,
   h,
-  tw = 64,
-  th = 64,
   transform,
-  overlay,
 }: {
   src: string;
   x: number;
   y: number;
   w: number;
   h: number;
-  tw?: number;
-  th?: number;
   transform: string;
-  overlay?: boolean;
 }) {
   return (
     <div
@@ -31,15 +26,16 @@ function Face({
         top: "50%",
         marginLeft: `${-w / 2}em`,
         marginTop: `${-h / 2}em`,
-        backgroundImage: `url(${src})`,
+        overflow: "hidden",
+        backgroundColor: "transparent",
+        backgroundImage: `url("${String(src).replace(/"/g, "")}")`,
         backgroundRepeat: "no-repeat",
-        backgroundSize: `${tw}em ${th}em`,
+        backgroundSize: "64em 64em",
         backgroundPosition: `${-x}em ${-y}em`,
         imageRendering: "pixelated",
         transform,
         backfaceVisibility: "hidden",
         pointerEvents: "none",
-        opacity: overlay ? 0.99 : 1,
       }}
     />
   );
@@ -69,7 +65,7 @@ function Cuboid({
   const zf = sz / 2;
   const xf = sx / 2;
   const yf = sy / 2;
-  const scale = overlay ? 1.06 : 1;
+  const scale = overlay ? 1.14 : 1;
   return (
     <div
       style={{
@@ -82,12 +78,12 @@ function Cuboid({
         transformStyle: "preserve-3d",
       }}
     >
-      <Face src={src} x={uv.f[0]} y={uv.f[1]} w={uv.f[2]} h={uv.f[3]} transform={`translateZ(${zf}em)`} overlay={overlay} />
-      <Face src={src} x={uv.b[0]} y={uv.b[1]} w={uv.b[2]} h={uv.b[3]} transform={`rotateY(180deg) translateZ(${zf}em)`} overlay={overlay} />
-      <Face src={src} x={uv.r[0]} y={uv.r[1]} w={uv.r[2]} h={uv.r[3]} transform={`rotateY(90deg) translateZ(${xf}em)`} overlay={overlay} />
-      <Face src={src} x={uv.l[0]} y={uv.l[1]} w={uv.l[2]} h={uv.l[3]} transform={`rotateY(-90deg) translateZ(${xf}em)`} overlay={overlay} />
-      <Face src={src} x={uv.t[0]} y={uv.t[1]} w={uv.t[2]} h={uv.t[3]} transform={`rotateX(90deg) translateZ(${yf}em)`} overlay={overlay} />
-      <Face src={src} x={uv.d[0]} y={uv.d[1]} w={uv.d[2]} h={uv.d[3]} transform={`rotateX(-90deg) translateZ(${yf}em)`} overlay={overlay} />
+      <Face src={src} x={uv.f[0]} y={uv.f[1]} w={uv.f[2]} h={uv.f[3]} transform={`translateZ(${zf}em)`} />
+      <Face src={src} x={uv.b[0]} y={uv.b[1]} w={uv.b[2]} h={uv.b[3]} transform={`rotateY(180deg) translateZ(${zf}em)`} />
+      <Face src={src} x={uv.r[0]} y={uv.r[1]} w={uv.r[2]} h={uv.r[3]} transform={`rotateY(90deg) translateZ(${xf}em)`} />
+      <Face src={src} x={uv.l[0]} y={uv.l[1]} w={uv.l[2]} h={uv.l[3]} transform={`rotateY(-90deg) translateZ(${xf}em)`} />
+      <Face src={src} x={uv.t[0]} y={uv.t[1]} w={uv.t[2]} h={uv.t[3]} transform={`rotateX(90deg) translateZ(${yf}em)`} />
+      <Face src={src} x={uv.d[0]} y={uv.d[1]} w={uv.d[2]} h={uv.d[3]} transform={`rotateX(-90deg) translateZ(${yf}em)`} />
     </div>
   );
 }
@@ -118,15 +114,16 @@ function UnwrapCanvas({ src }: { src: string }) {
         ctx.lineTo(i * cell, h);
         ctx.stroke();
       }
-      for (let i = 0; i <= img.height / (img.width / 8); i++) {
+      for (let i = 0; i <= 8; i++) {
         ctx.beginPath();
         ctx.moveTo(0, i * cell);
         ctx.lineTo(w, i * cell);
         ctx.stroke();
       }
-      ctx.fillStyle = "rgba(16,185,129,0.9)";
+      ctx.fillStyle = "rgba(16,185,129,0.95)";
       ctx.font = "10px ui-sans-serif, system-ui";
       ctx.fillText("голова", cell + 4, cell - 4);
+      ctx.fillText("слой 2", cell * 5 + 4, cell - 4);
       ctx.fillText("тело", cell * 2.5, cell * 3 - 4);
       ctx.fillText("рука", cell * 5.2, cell * 3 - 4);
       ctx.fillText("нога", 6, cell * 3 - 4);
@@ -146,9 +143,29 @@ export default function SkinViewer({
   slim?: boolean;
 }) {
   const [mode, setMode] = useState<"3d" | "unwrap">("3d");
+  const [layers, setLayers] = useState(true);
+  const [norm, setNorm] = useState<string | undefined>(undefined);
   const [yaw, setYaw] = useState(28);
   const [pitch, setPitch] = useState(-12);
   const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+
+  useEffect(() => {
+    if (!skin) {
+      setNorm(undefined);
+      return;
+    }
+    let cancelled = false;
+    normalizeSkinDataUrl(skin)
+      .then((url) => {
+        if (!cancelled) setNorm(url);
+      })
+      .catch(() => {
+        if (!cancelled) setNorm(skin);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [skin]);
 
   useEffect(() => {
     if (mode !== "3d") return;
@@ -164,12 +181,13 @@ export default function SkinViewer({
     return () => cancelAnimationFrame(id);
   }, [mode]);
 
+  const tex = norm || skin;
   const armW = slim ? 3 : 4;
   const armX = 4 + armW / 2;
 
   return (
     <div className="rounded-xl border border-white/[0.08] bg-black/30 p-3">
-      <div className="mb-2 flex items-center gap-1">
+      <div className="mb-2 flex flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => setMode("3d")}
@@ -188,20 +206,30 @@ export default function SkinViewer({
         >
           Развёртка
         </button>
-        <span className="ml-auto text-[10px] text-white/35">{slim ? "Alex" : "Steve"} · крутите мышью</span>
+        <button
+          type="button"
+          onClick={() => setLayers((v) => !v)}
+          className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+            layers ? "bg-emerald-500/20 text-emerald-200" : "bg-white/[0.06] text-white/50"
+          }`}
+          title="Второй слой: шапка, куртка, рукава"
+        >
+          Слои
+        </button>
+        <span className="ml-auto text-[10px] text-white/35">{slim ? "Alex" : "Steve"}</span>
       </div>
 
-      {!skin ? (
+      {!tex ? (
         <div className="flex h-[220px] items-center justify-center text-center text-xs text-white/35">
           Загрузите PNG или скин по нику —
           <br />
           здесь появится 3D-модель
         </div>
       ) : mode === "unwrap" ? (
-        <UnwrapCanvas src={skin} />
+        <UnwrapCanvas src={tex} />
       ) : (
         <div
-          className="relative h-[240px] cursor-grab overflow-hidden rounded-lg bg-[radial-gradient(circle_at_50%_30%,#1a1d27,transparent_70%)] active:cursor-grabbing"
+          className="relative h-[260px] cursor-grab overflow-hidden rounded-lg bg-[radial-gradient(circle_at_50%_30%,#1a1d27,transparent_70%)] active:cursor-grabbing"
           onPointerDown={(e) => {
             (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
             drag.current = { x: e.clientX, y: e.clientY, yaw, pitch };
@@ -219,15 +247,15 @@ export default function SkinViewer({
             style={{
               position: "absolute",
               inset: 0,
-              perspective: "420px",
-              perspectiveOrigin: "50% 40%",
+              perspective: "480px",
+              perspectiveOrigin: "50% 38%",
             }}
           >
             <div
               style={{
                 position: "absolute",
                 left: "50%",
-                top: "54%",
+                top: "64%",
                 width: 0,
                 height: 0,
                 fontSize: 5,
@@ -236,7 +264,7 @@ export default function SkinViewer({
               }}
             >
               <Cuboid
-                src={skin}
+                src={tex}
                 cx={0}
                 cy={-10}
                 cz={0}
@@ -245,19 +273,21 @@ export default function SkinViewer({
                 sz={8}
                 uv={{ r: [0, 8, 8, 8], f: [8, 8, 8, 8], l: [16, 8, 8, 8], b: [24, 8, 8, 8], t: [8, 0, 8, 8], d: [16, 0, 8, 8] }}
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={0}
+                  cy={-10}
+                  cz={0}
+                  sx={8}
+                  sy={8}
+                  sz={8}
+                  overlay
+                  uv={{ r: [32, 8, 8, 8], f: [40, 8, 8, 8], l: [48, 8, 8, 8], b: [56, 8, 8, 8], t: [40, 0, 8, 8], d: [48, 0, 8, 8] }}
+                />
+              )}
               <Cuboid
-                src={skin}
-                cx={0}
-                cy={-10}
-                cz={0}
-                sx={8}
-                sy={8}
-                sz={8}
-                overlay
-                uv={{ r: [32, 8, 8, 8], f: [40, 8, 8, 8], l: [48, 8, 8, 8], b: [56, 8, 8, 8], t: [40, 0, 8, 8], d: [48, 0, 8, 8] }}
-              />
-              <Cuboid
-                src={skin}
+                src={tex}
                 cx={0}
                 cy={0}
                 cz={0}
@@ -266,19 +296,21 @@ export default function SkinViewer({
                 sz={4}
                 uv={{ r: [16, 20, 4, 12], f: [20, 20, 8, 12], l: [28, 20, 4, 12], b: [32, 20, 8, 12], t: [20, 16, 8, 4], d: [28, 16, 8, 4] }}
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={0}
+                  cy={0}
+                  cz={0}
+                  sx={8}
+                  sy={12}
+                  sz={4}
+                  overlay
+                  uv={{ r: [16, 36, 4, 12], f: [20, 36, 8, 12], l: [28, 36, 4, 12], b: [32, 36, 8, 12], t: [20, 32, 8, 4], d: [28, 32, 8, 4] }}
+                />
+              )}
               <Cuboid
-                src={skin}
-                cx={0}
-                cy={0}
-                cz={0}
-                sx={8}
-                sy={12}
-                sz={4}
-                overlay
-                uv={{ r: [16, 36, 4, 12], f: [20, 36, 8, 12], l: [28, 36, 4, 12], b: [32, 36, 8, 12], t: [20, 32, 8, 4], d: [28, 32, 8, 4] }}
-              />
-              <Cuboid
-                src={skin}
+                src={tex}
                 cx={armX}
                 cy={0}
                 cz={0}
@@ -291,8 +323,25 @@ export default function SkinViewer({
                     : { r: [40, 20, 4, 12], f: [44, 20, 4, 12], l: [48, 20, 4, 12], b: [52, 20, 4, 12], t: [44, 16, 4, 4], d: [48, 16, 4, 4] }
                 }
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={armX}
+                  cy={0}
+                  cz={0}
+                  sx={armW}
+                  sy={12}
+                  sz={4}
+                  overlay
+                  uv={
+                    slim
+                      ? { r: [40, 36, 4, 12], f: [44, 36, 3, 12], l: [47, 36, 4, 12], b: [51, 36, 3, 12], t: [44, 32, 3, 4], d: [47, 32, 3, 4] }
+                      : { r: [40, 36, 4, 12], f: [44, 36, 4, 12], l: [48, 36, 4, 12], b: [52, 36, 4, 12], t: [44, 32, 4, 4], d: [48, 32, 4, 4] }
+                  }
+                />
+              )}
               <Cuboid
-                src={skin}
+                src={tex}
                 cx={-armX}
                 cy={0}
                 cz={0}
@@ -305,8 +354,25 @@ export default function SkinViewer({
                     : { r: [32, 52, 4, 12], f: [36, 52, 4, 12], l: [40, 52, 4, 12], b: [44, 52, 4, 12], t: [36, 48, 4, 4], d: [40, 48, 4, 4] }
                 }
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={-armX}
+                  cy={0}
+                  cz={0}
+                  sx={armW}
+                  sy={12}
+                  sz={4}
+                  overlay
+                  uv={
+                    slim
+                      ? { r: [48, 52, 4, 12], f: [52, 52, 3, 12], l: [55, 52, 4, 12], b: [59, 52, 3, 12], t: [52, 48, 3, 4], d: [55, 48, 3, 4] }
+                      : { r: [48, 52, 4, 12], f: [52, 52, 4, 12], l: [56, 52, 4, 12], b: [60, 52, 4, 12], t: [52, 48, 4, 4], d: [56, 48, 4, 4] }
+                  }
+                />
+              )}
               <Cuboid
-                src={skin}
+                src={tex}
                 cx={2}
                 cy={12}
                 cz={0}
@@ -315,8 +381,21 @@ export default function SkinViewer({
                 sz={4}
                 uv={{ r: [0, 20, 4, 12], f: [4, 20, 4, 12], l: [8, 20, 4, 12], b: [12, 20, 4, 12], t: [4, 16, 4, 4], d: [8, 16, 4, 4] }}
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={2}
+                  cy={12}
+                  cz={0}
+                  sx={4}
+                  sy={12}
+                  sz={4}
+                  overlay
+                  uv={{ r: [0, 36, 4, 12], f: [4, 36, 4, 12], l: [8, 36, 4, 12], b: [12, 36, 4, 12], t: [4, 32, 4, 4], d: [8, 32, 4, 4] }}
+                />
+              )}
               <Cuboid
-                src={skin}
+                src={tex}
                 cx={-2}
                 cy={12}
                 cz={0}
@@ -325,6 +404,19 @@ export default function SkinViewer({
                 sz={4}
                 uv={{ r: [16, 52, 4, 12], f: [20, 52, 4, 12], l: [24, 52, 4, 12], b: [28, 52, 4, 12], t: [20, 48, 4, 4], d: [24, 48, 4, 4] }}
               />
+              {layers && (
+                <Cuboid
+                  src={tex}
+                  cx={-2}
+                  cy={12}
+                  cz={0}
+                  sx={4}
+                  sy={12}
+                  sz={4}
+                  overlay
+                  uv={{ r: [0, 52, 4, 12], f: [4, 52, 4, 12], l: [8, 52, 4, 12], b: [12, 52, 4, 12], t: [4, 48, 4, 4], d: [8, 48, 4, 4] }}
+                />
+              )}
               {cape && (
                 <div
                   style={{
@@ -335,11 +427,12 @@ export default function SkinViewer({
                     height: "16em",
                     marginLeft: "-5em",
                     marginTop: "-6em",
-                    backgroundImage: `url(${cape})`,
+                    overflow: "hidden",
+                    backgroundImage: `url("${String(cape).replace(/"/g, "")}")`,
                     backgroundSize: "64em 32em",
                     backgroundPosition: "-1em -1em",
                     imageRendering: "pixelated",
-                    transform: "translateZ(-2.6em) rotateX(8deg)",
+                    transform: "translateZ(-2.8em) rotateX(8deg)",
                     transformOrigin: "top center",
                   }}
                 />
