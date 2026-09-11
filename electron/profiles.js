@@ -4,6 +4,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PROFILE_SUBDIRS = ["mods", "resourcepacks", "shaderpacks", "datapacks", "modpacks", "saves", "config", "screenshots"];
 
@@ -140,12 +141,17 @@ function listProfileContent(userDataPath, profileName) {
       if (!e.isFile() && !e.isDirectory()) continue;
       const full = path.join(folder, e.name);
       let size = 0;
+      let sha1 = null;
       try {
         size = fs.statSync(full).size;
+        if (e.isFile() && size > 0 && size < 80 * 1024 * 1024) {
+          sha1 = crypto.createHash("sha1").update(fs.readFileSync(full)).digest("hex");
+        }
       } catch {}
       out.push({
         fileName: e.name,
         size,
+        sha1,
         subfolder: sub,
         projectType,
         isDir: e.isDirectory(),

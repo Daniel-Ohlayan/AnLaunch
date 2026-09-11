@@ -329,6 +329,82 @@ export async function downloadModJar(installed: Omit<InstalledMod, "installedAt"
   URL.revokeObjectURL(url);
 }
 
+export interface FileProjectMeta {
+  project_id: string;
+  slug: string;
+  title: string;
+  description: string;
+  icon_url: string | null;
+}
+
+export async function identifyModsByHashes(hashes: string[]): Promise<Record<string, FileProjectMeta>> {
+  const unique = [...new Set(hashes.filter(Boolean))];
+  if (!unique.length) return {};
+  const res = await fetch(`${BASE}/version_files`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ hashes: unique, algorithm: "sha1" }),
+  });
+  if (!res.ok) return {};
+  const versions = (await res.json()) as Record<string, { project_id?: string }>;
+  const ids = [...new Set(Object.values(versions).map((v) => v.project_id).filter(Boolean))] as string[];
+  if (!ids.length) return {};
+  const pres = await fetch(`${BASE}/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!pres.ok) return {};
+  const projects = (await pres.json()) as ModrinthProject[];
+  const byId = new Map(projects.map((p) => [p.id, p]));
+  const out: Record<string, FileProjectMeta> = {};
+  for (const [hash, ver] of Object.entries(versions)) {
+    const p = ver.project_id ? byId.get(ver.project_id) : null;
+    if (!p) continue;
+    out[hash] = {
+      project_id: p.id,
+      slug: p.slug,
+      title: p.title,
+      description: p.description,
+      icon_url: p.icon_url,
+    };
+  }
+  return out;
+}
+
+export function guessModSlug(fileName: string): string {
+  let n = String(fileName || "").replace(/\.(jar|zip|litemod)(\.disabled)?$/i, "");
+  n = n.replace(/[+]mc[\d.]+$/i, "");
+  n = n.replace(/[-_](fabric|forge|quilt|neoforge)$/i, "");
+  n = n.replace(/[-_](\d+\.)+\d+[a-z0-9-+.]*$/i, "");
+  n = n.replace(/[-_]mc[\d.]+$/i, "");
+  return n.trim();
+}
+
+export async function identifyModByFilename(
+  fileName: string,
+  projectType: ProjectType,
+  loader?: ModLoader
+): Promise<FileProjectMeta | null> {
+  const slug = guessModSlug(fileName);
+  if (!slug || slug.length < 2) return null;
+  try {
+    const data = await searchMods({ query: slug, projectType, loader, limit: 5, index: "relevance" });
+    const hit =
+      data.hits.find((h) => h.slug === slug || h.slug.replace(/-/g, "") === slug.replace(/[-_]/g, "")) ||
+      data.hits.find((h) => h.title.toLowerCase().replace(/\s+/g, "") === slug.toLowerCase().replace(/[-_]/g, "")) ||
+      data.hits[0];
+    if (!hit) return null;
+    return {
+      project_id: hit.project_id,
+      slug: hit.slug,
+      title: hit.title,
+      description: hit.description,
+      icon_url: hit.icon_url,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function formatDownloads(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;

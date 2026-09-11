@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType, ProjectVersion } from "../lib/modrinth";
+import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType, ProjectVersion, FileProjectMeta } from "../lib/modrinth";
 import {
   PROJECT_TYPE_LABELS,
   searchMods,
@@ -7,6 +7,8 @@ import {
   formatSize,
   contentTypesForLoader,
   loaderLabel,
+  identifyModsByHashes,
+  identifyModByFilename,
 } from "../lib/modrinth";
 import { SearchIcon, DownloadIcon, CheckIcon, CloseIcon, CubeIcon } from "./icons";
 import { getAccent } from "../lib/accent";
@@ -64,8 +66,9 @@ export default function ModsView({
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<ModHit | null>(null);
   const [diskFiles, setDiskFiles] = useState<
-    { fileName: string; size: number; subfolder: string; projectType: string }[]
+    { fileName: string; size: number; sha1?: string | null; subfolder: string; projectType: string }[]
   >([]);
+  const [fileMeta, setFileMeta] = useState<Record<string, FileProjectMeta>>({});
   const LIMIT = 20;
 
   const accent = getAccent(homeSettings?.accentColor);
@@ -83,16 +86,23 @@ export default function ModsView({
     const seen = new Set<string>();
     for (const f of diskFiles.filter((d) => d.projectType === projectType)) {
       const known = byFile.get(f.fileName);
+      const meta = fileMeta[f.fileName];
       if (known) {
-        rows.push(known);
+        rows.push({
+          ...known,
+          icon_url: known.icon_url || meta?.icon_url || null,
+          title: known.title || meta?.title || known.fileName,
+          slug: known.slug || meta?.slug || "",
+          id: known.id || meta?.project_id || known.fileName,
+        });
         seen.add(known.fileName);
       } else {
         rows.push({
-          id: `disk:${f.subfolder}:${f.fileName}`,
-          slug: "",
-          title: f.fileName.replace(/\.(jar|zip|litemod)(\.disabled)?$/i, ""),
-          description: "Файл из папки профиля",
-          icon_url: null,
+          id: meta?.project_id || `disk:${f.subfolder}:${f.fileName}`,
+          slug: meta?.slug || "",
+          title: meta?.title || f.fileName.replace(/\.(jar|zip|litemod)(\.disabled)?$/i, ""),
+          description: meta?.description || "Файл из папки профиля",
+          icon_url: meta?.icon_url || null,
           author: "",
           source: "modrinth",
           projectType,
@@ -101,7 +111,7 @@ export default function ModsView({
           downloadsUrl: "",
           profile: activeProfile,
           installedAt: 0,
-          fromDisk: true,
+          fromDisk: !meta,
         });
         seen.add(f.fileName);
       }
@@ -110,7 +120,7 @@ export default function ModsView({
       if (!seen.has(m.fileName)) rows.push({ ...m, missing: true });
     }
     return rows;
-  }, [profileMods, projectType, diskFiles, activeProfile]);
+  }, [profileMods, projectType, diskFiles, activeProfile, fileMeta]);
 
   async function refreshDisk() {
     if (!window.electronAPI?.listProfileContent) {
@@ -362,7 +372,7 @@ export default function ModsView({
                   missing={"missing" in m && !!m.missing}
                   fromDisk={"fromDisk" in m && !!m.fromDisk}
                   onOpen={() => {
-                    if (m.slug && !String(m.id).startsWith("disk:")) {
+                    if (m.slug && m.id && !String(m.id).startsWith("disk:")) {
                       setDetail({
                         project_id: m.id,
                         slug: m.slug,
