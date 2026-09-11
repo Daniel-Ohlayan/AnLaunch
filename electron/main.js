@@ -483,6 +483,11 @@ ipcMain.handle("list-profiles", () => {
   return listProfiles(app.getPath("userData"));
 });
 
+ipcMain.handle("list-profile-content", (_event, name) => {
+  const { listProfileContent } = require("./profiles");
+  return listProfileContent(app.getPath("userData"), name || "Default");
+});
+
 ipcMain.handle("create-profile", (_event, name) => {
   const { ensureProfile } = require("./profiles");
   return ensureProfile(app.getPath("userData"), name);
@@ -615,8 +620,16 @@ ipcMain.handle("remove-mod-from-profile", async (_event, { profile, fileName, su
   const { ensureProfile } = require("./profiles");
   try {
     const { dir } = ensureProfile(app.getPath("userData"), profile || "Default");
-    const filePath = path.join(dir, subfolder || "mods", fileName);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const safeName = path.basename(String(fileName || ""));
+    if (!safeName || safeName === "." || safeName === "..") {
+      return { success: false, error: "Некорректное имя файла" };
+    }
+    const filePath = path.join(dir, subfolder || "mods", safeName);
+    if (fs.existsSync(filePath)) {
+      const st = fs.lstatSync(filePath);
+      if (st.isDirectory()) fs.rmSync(filePath, { recursive: true, force: true });
+      else fs.unlinkSync(filePath);
+    }
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };

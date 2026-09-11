@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ModLoader } from "../lib/modrinth";
+import { ruCount } from "../lib/modrinth";
 import type { Account } from "../lib/accounts";
 import type { ProfileInfo } from "../types/electron";
 import { PlayIcon } from "./icons";
@@ -114,7 +115,7 @@ export default function PlayView({
             {homeSettings.showStats && (
               <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
                 <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-white/70 backdrop-blur">
-                  {installedCount ?? 0} модов
+                  {ruCount(installedCount ?? 0, "мод", "мода", "модов")}
                 </span>
                 <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-white/70 backdrop-blur">
                   {ram} ГБ RAM

@@ -64,6 +64,9 @@ export interface ElectronAPI {
 
   // Профили
   listProfiles: () => Promise<ProfileInfo[]>;
+  listProfileContent: (name: string) => Promise<
+    { fileName: string; size: number; subfolder: string; projectType: string; isDir?: boolean }[]
+  >;
   createProfile: (name: string) => Promise<{ name: string; dir: string }>;
   renameProfile: (oldName: string, newName: string) => Promise<{
     success: boolean;

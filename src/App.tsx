@@ -12,6 +12,7 @@ import {
   type ModLoader,
   type ModHit,
   type ProjectType,
+  type ProjectVersion,
   downloadModJar,
   downloadModToProfile,
   getProjectVersions,
@@ -246,25 +247,38 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [launching.progress]);
 
-  async function installMod(hit: ModHit, projectType: ProjectType = "mod") {
+  async function installMod(hit: ModHit, projectType: ProjectType = "mod", version?: ProjectVersion) {
     if ((projectType === "mod" || projectType === "modpack") && loader === "vanilla") {
       throw new Error(
         "На Vanilla моды не устанавливаются. Создайте профиль с Fabric или Quilt."
       );
     }
 
-    // 1. Находим совместимый файл
-    const versions = await getProjectVersions(hit.project_id, {
-      loader,
-      gameVersion,
-      projectType,
-    });
-    const file = findCompatibleFile(versions, loader, gameVersion as any, projectType);
+    let file = version ? version.files.find((f) => f.primary) || version.files[0] : null;
+    if (!file) {
+      const versions = await getProjectVersions(hit.project_id, {
+        loader,
+        gameVersion,
+        projectType,
+      });
+      file = findCompatibleFile(versions, loader, gameVersion as any, projectType);
+    }
     if (!file) {
       throw new Error(
         `Для Minecraft ${gameVersion} (${loader}) нет совместимой версии «${hit.title}». ` +
         `Старый файл установлен не будет.`
       );
+    }
+
+    const prev = installedMods.find((m) => m.id === hit.project_id && m.profile === activeProfile);
+    if (prev && prev.fileName !== file.filename && window.electronAPI) {
+      try {
+        await window.electronAPI.removeModFromProfile({
+          profile: activeProfile,
+          fileName: prev.fileName,
+          subfolder: getSubfolderForType(projectType),
+        });
+      } catch {}
     }
 
     // 2. Реально скачиваем в папку профиля
@@ -307,22 +321,20 @@ export default function App() {
       profile: activeProfile,
       installedAt: Date.now(),
     };
-    setInstalledMods((prev) =>
-      prev.some((m) => m.id === installed.id && m.profile === installed.profile)
-        ? prev
-        : [...prev, installed]
-    );
+    setInstalledMods((prev) => {
+      const rest = prev.filter((m) => !(m.id === installed.id && m.profile === installed.profile));
+      return [...rest, installed];
+    });
     setModStates((s) => ({ ...s, [installed.id]: true }));
+    refreshProfiles();
   }
 
   async function exportInstalled(mod: InstalledMod) {
     await downloadModJar(mod);
   }
 
-  async function removeMod(id: string) {
-    const mod = installedMods.find((m) => m.id === id);
-    // Реально удаляем файл из папки профиля
-    if (mod && window.electronAPI) {
+  async function removeMod(mod: InstalledMod) {
+    if (window.electronAPI && mod.fileName) {
       try {
         await window.electronAPI.removeModFromProfile({
           profile: mod.profile || activeProfile,
@@ -334,13 +346,22 @@ export default function App() {
       }
     }
     setInstalledMods((prev) =>
-      prev.filter((m) => !(m.id === id && (m.profile === activeProfile || m.profile === mod?.profile)))
+      prev.filter(
+        (m) =>
+          !(
+            m.fileName === mod.fileName &&
+            (m.profile === activeProfile || m.profile === mod.profile || !m.profile)
+          )
+      )
     );
-    setModStates((s) => {
-      const n = { ...s };
-      delete n[id];
-      return n;
-    });
+    if (!String(mod.id).startsWith("disk:")) {
+      setModStates((s) => {
+        const n = { ...s };
+        delete n[mod.id];
+        return n;
+      });
+    }
+    refreshProfiles();
   }
 
   function addLog(level: "info" | "warn" | "error" | "success", text: string) {
@@ -562,7 +583,10 @@ export default function App() {
               activeProfile={activeProfile}
               onLaunch={launch}
               javaPath={javaPath}
-              installedCount={installedMods.filter((m) => m.profile === activeProfile || !m.profile).length}
+              installedCount={
+                profiles.find((p) => p.name === activeProfile)?.mods ??
+                installedMods.filter((m) => m.profile === activeProfile || !m.profile).length
+              }
               profiles={profiles}
               onProfileChange={selectProfile}
               onRenameProfile={async (old: string, n: string) => {
@@ -607,6 +631,7 @@ export default function App() {
               onInstall={installMod}
               onExport={exportInstalled}
               onRemove={removeMod}
+              onContentChanged={refreshProfiles}
               homeSettings={homeSettings}
             />
           )}

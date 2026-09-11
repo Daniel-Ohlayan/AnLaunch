@@ -73,6 +73,57 @@ export interface VersionFile {
   hashes: { sha1?: string; sha512?: string };
 }
 
+export interface ModrinthGalleryItem {
+  url: string;
+  featured?: boolean;
+  title?: string | null;
+  description?: string | null;
+}
+
+export interface ModrinthProject {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  body?: string;
+  categories: string[];
+  additional_categories?: string[];
+  client_side?: string;
+  server_side?: string;
+  project_type: string;
+  downloads: number;
+  followers?: number;
+  icon_url: string | null;
+  license?: { id?: string; name?: string } | string;
+  gallery?: ModrinthGalleryItem[];
+  published?: string;
+  updated?: string;
+  issues_url?: string | null;
+  source_url?: string | null;
+  wiki_url?: string | null;
+  discord_url?: string | null;
+  donation_urls?: { id?: string; platform?: string; url: string }[];
+  loaders?: string[];
+  game_versions?: string[];
+}
+
+export async function getProject(idOrSlug: string): Promise<ModrinthProject> {
+  const res = await fetch(`${BASE}/project/${encodeURIComponent(idOrSlug)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Modrinth project failed: ${res.status}`);
+  return res.json();
+}
+
+export function ruCount(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n) % 100;
+  const d = abs % 10;
+  if (abs > 10 && abs < 20) return `${n} ${many}`;
+  if (d === 1) return `${n} ${one}`;
+  if (d >= 2 && d <= 4) return `${n} ${few}`;
+  return `${n} ${many}`;
+}
+
 export interface ProjectVersion {
   id: string;
   name: string;

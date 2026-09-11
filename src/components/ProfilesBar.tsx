@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ProfileInfo } from "../types/electron";
+import { ruCount } from "../lib/modrinth";
 
 export default function ProfilesBar({
   profiles,
@@ -149,7 +150,7 @@ export default function ProfilesBar({
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{p.name}</div>
                     <div className={`truncate text-[10px] ${isActive ? "text-white/70" : "text-white/40"}`}>
-                      {p.mods} модов · {p.resourcepacks} рп · {p.shaderpacks} шейдеров
+                      {ruCount(p.mods, "мод", "мода", "модов")} · {ruCount(p.resourcepacks, "рп", "рп", "рп")} · {ruCount(p.shaderpacks, "шейдер", "шейдера", "шейдеров")}
                     </div>
                   </div>
                   {isActive && (

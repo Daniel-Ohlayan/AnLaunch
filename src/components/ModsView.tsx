@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType } from "../lib/modrinth";
+import type { InstalledMod, ModLoader, ModHit, SortIndex, ProjectType, ProjectVersion } from "../lib/modrinth";
 import {
   PROJECT_TYPE_LABELS,
   searchMods,
@@ -10,6 +10,7 @@ import {
 } from "../lib/modrinth";
 import { SearchIcon, DownloadIcon, CheckIcon, CloseIcon, CubeIcon } from "./icons";
 import { getAccent } from "../lib/accent";
+import ModDetailModal from "./ModDetailModal";
 
 const SORTS: { id: SortIndex; label: string }[] = [
   { id: "downloads", label: "По загрузкам" },
@@ -35,15 +36,17 @@ export default function ModsView({
   onInstall,
   onExport,
   onRemove,
+  onContentChanged,
   homeSettings,
 }: {
   gameVersion: string;
   loader: ModLoader;
   activeProfile: string;
   installedMods: InstalledMod[];
-  onInstall: (hit: ModHit, projectType: ProjectType) => Promise<void>;
+  onInstall: (hit: ModHit, projectType: ProjectType, version?: ProjectVersion) => Promise<void>;
   onExport: (mod: InstalledMod) => Promise<void>;
-  onRemove: (id: string) => void;
+  onRemove: (mod: InstalledMod) => void;
+  onContentChanged?: () => void;
   homeSettings?: { accentColor?: string };
 }) {
   const [query, setQuery] = useState("");
@@ -60,6 +63,9 @@ export default function ModsView({
   const [tab, setTab] = useState<"browse" | "installed">("browse");
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<ModHit | null>(null);
+  const [diskFiles, setDiskFiles] = useState<
+    { fileName: string; size: number; subfolder: string; projectType: string }[]
+  >([]);
   const LIMIT = 20;
 
   const accent = getAccent(homeSettings?.accentColor);
@@ -70,10 +76,59 @@ export default function ModsView({
     [installedMods, activeProfile]
   );
   const installedIds = useMemo(() => new Set(profileMods.map((m) => m.id)), [profileMods]);
-  const installedByType = useMemo(
-    () => profileMods.filter((m) => m.projectType === projectType),
-    [profileMods, projectType]
-  );
+  const installedByType = useMemo(() => {
+    const catalog = profileMods.filter((m) => m.projectType === projectType);
+    const byFile = new Map(catalog.map((m) => [m.fileName, m]));
+    const rows: (InstalledMod & { missing?: boolean; fromDisk?: boolean })[] = [];
+    const seen = new Set<string>();
+    for (const f of diskFiles.filter((d) => d.projectType === projectType)) {
+      const known = byFile.get(f.fileName);
+      if (known) {
+        rows.push(known);
+        seen.add(known.fileName);
+      } else {
+        rows.push({
+          id: `disk:${f.subfolder}:${f.fileName}`,
+          slug: "",
+          title: f.fileName.replace(/\.(jar|zip|litemod)(\.disabled)?$/i, ""),
+          description: "Файл из папки профиля",
+          icon_url: null,
+          author: "",
+          source: "modrinth",
+          projectType,
+          fileName: f.fileName,
+          size: f.size,
+          downloadsUrl: "",
+          profile: activeProfile,
+          installedAt: 0,
+          fromDisk: true,
+        });
+        seen.add(f.fileName);
+      }
+    }
+    for (const m of catalog) {
+      if (!seen.has(m.fileName)) rows.push({ ...m, missing: true });
+    }
+    return rows;
+  }, [profileMods, projectType, diskFiles, activeProfile]);
+
+  async function refreshDisk() {
+    if (!window.electronAPI?.listProfileContent) {
+      setDiskFiles([]);
+      return;
+    }
+    try {
+      const list = await window.electronAPI.listProfileContent(activeProfile);
+      setDiskFiles(list || []);
+    } catch {
+      setDiskFiles([]);
+    }
+  }
+
+  useEffect(() => {
+    refreshDisk();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProfile, tab]);
 
   async function runSearch(q?: string, p?: number) {
     if (!availableTypes.includes(projectType)) {
@@ -129,11 +184,13 @@ export default function ModsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, index, loader, gameVersion, projectType]);
 
-  async function handleInstall(hit: ModHit) {
+  async function handleInstall(hit: ModHit, version?: ProjectVersion) {
     setInstalling((s) => new Set(s).add(hit.project_id));
     setError(null);
     try {
-      await onInstall(hit, projectType);
+      await onInstall(hit, projectType, version);
+      await refreshDisk();
+      onContentChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка установки");
     } finally {
@@ -143,6 +200,14 @@ export default function ModsView({
         return n;
       });
     }
+  }
+
+  async function handleRemove(mod: InstalledMod) {
+    onRemove(mod);
+    setTimeout(() => {
+      refreshDisk();
+      onContentChanged?.();
+    }, 50);
   }
 
   return (
@@ -277,26 +342,67 @@ export default function ModsView({
           <CenteredMessage text={`Пока нет установленных ${PROJECT_TYPE_LABELS[projectType].toLowerCase()}.`} />
         ) : (
           <div className="space-y-2">
-            {installedByType.map((m) => (
-              <InstalledRow
-                key={m.id}
-                mod={m}
-                onExport={() => onExport(m)}
-                onRemove={() => onRemove(m.id)}
-              />
-            ))}
+            <div className="mb-1 text-xs text-white/40">
+              В папке профиля: {installedByType.length} (включая файлы не из каталога)
+            </div>
+            {installedByType
+              .filter((m) => {
+                const q = query.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  m.title.toLowerCase().includes(q) ||
+                  m.fileName.toLowerCase().includes(q) ||
+                  (m.author || "").toLowerCase().includes(q)
+                );
+              })
+              .map((m) => (
+                <InstalledRow
+                  key={`${m.id}:${m.fileName}`}
+                  mod={m}
+                  missing={"missing" in m && !!m.missing}
+                  fromDisk={"fromDisk" in m && !!m.fromDisk}
+                  onOpen={() => {
+                    if (m.slug && !String(m.id).startsWith("disk:")) {
+                      setDetail({
+                        project_id: m.id,
+                        slug: m.slug,
+                        title: m.title,
+                        description: m.description,
+                        categories: [],
+                        client_side: "",
+                        server_side: "",
+                        project_type: m.projectType,
+                        downloads: 0,
+                        icon_url: m.icon_url,
+                        author: m.author,
+                        versions: [],
+                        follows: 0,
+                        date_created: "",
+                        date_modified: "",
+                        license: "",
+                      });
+                    }
+                  }}
+                  onExport={() => m.downloadsUrl && onExport(m)}
+                  onRemove={() => handleRemove(m)}
+                />
+              ))}
           </div>
         )}
       </div>
 
       {detail && (
-        <DetailModal
+        <ModDetailModal
           hit={detail}
           onClose={() => setDetail(null)}
-          onInstall={() => handleInstall(detail)}
+          onInstall={async (version) => {
+            await handleInstall(detail, version);
+          }}
           installing={installing.has(detail.project_id)}
           installed={installedIds.has(detail.project_id)}
           projectType={projectType}
+          loader={loader}
+          gameVersion={gameVersion}
           accentColor={homeSettings?.accentColor}
         />
       )}
@@ -370,32 +476,46 @@ function ModCard({
 
 function InstalledRow({
   mod,
+  missing,
+  fromDisk,
+  onOpen,
   onExport,
   onRemove,
 }: {
   mod: InstalledMod;
+  missing?: boolean;
+  fromDisk?: boolean;
+  onOpen: () => void;
   onExport: () => void;
   onRemove: () => void;
 }) {
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-      <ModIcon url={mod.icon_url} />
-      <div className="min-w-0 flex-1">
+      <button type="button" onClick={onOpen} className="shrink-0" title="Подробнее">
+        <ModIcon url={mod.icon_url} />
+      </button>
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="truncate text-sm font-semibold text-white">{mod.title}</div>
         <div className="truncate text-xs text-white/40">
           {mod.fileName} · {formatSize(mod.size)}
+          {fromDisk ? " · не из каталога" : ""}
+          {missing ? " · файл не найден" : ""}
         </div>
-      </div>
-      <button
-        onClick={onExport}
-        className="flex items-center gap-1.5 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/[0.1]"
-      >
-        <DownloadIcon className="h-3.5 w-3.5" /> Экспорт
       </button>
+      {mod.downloadsUrl ? (
+        <button
+          type="button"
+          onClick={onExport}
+          className="flex items-center gap-1.5 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/[0.1]"
+        >
+          <DownloadIcon className="h-3.5 w-3.5" /> Экспорт
+        </button>
+      ) : null}
       <button
+        type="button"
         onClick={onRemove}
-        className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.05] text-white/50 transition hover:bg-red-500/10 hover:text-red-300"
-        title="Удалить"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-white/70 transition hover:bg-red-500/15 hover:text-red-300"
+        title="Удалить из профиля"
       >
         <CloseIcon className="h-4 w-4" />
       </button>

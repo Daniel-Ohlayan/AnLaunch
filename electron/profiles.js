@@ -99,7 +99,9 @@ function listProfiles(userDataPath) {
     const dir = path.join(profilesDir, name);
     const countFiles = (sub) => {
       try {
-        return fs.readdirSync(path.join(dir, sub)).filter((f) => !f.startsWith(".")).length;
+        return fs
+          .readdirSync(path.join(dir, sub), { withFileTypes: true })
+          .filter((f) => !f.name.startsWith(".") && (f.isFile() || f.isDirectory())).length;
       } catch {
         return 0;
       }
@@ -115,6 +117,44 @@ function listProfiles(userDataPath) {
   });
 }
 
+function listProfileContent(userDataPath, profileName) {
+  const { dir } = ensureProfile(userDataPath, profileName);
+  const mapping = [
+    ["mods", "mod"],
+    ["resourcepacks", "resourcepack"],
+    ["shaderpacks", "shader"],
+    ["datapacks", "datapack"],
+    ["modpacks", "modpack"],
+  ];
+  const out = [];
+  for (const [sub, projectType] of mapping) {
+    const folder = path.join(dir, sub);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folder, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      if (!e.isFile() && !e.isDirectory()) continue;
+      const full = path.join(folder, e.name);
+      let size = 0;
+      try {
+        size = fs.statSync(full).size;
+      } catch {}
+      out.push({
+        fileName: e.name,
+        size,
+        subfolder: sub,
+        projectType,
+        isDir: e.isDirectory(),
+      });
+    }
+  }
+  return out;
+}
+
 module.exports = {
   ensureDir,
   getRootDir,
@@ -125,5 +165,6 @@ module.exports = {
   resolveLaunchProfile,
   sanitizeProfileName,
   listProfiles,
+  listProfileContent,
   PROFILE_SUBDIRS,
 };

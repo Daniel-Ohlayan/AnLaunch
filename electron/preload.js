@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Профили
   listProfiles: () => ipcRenderer.invoke("list-profiles"),
+  listProfileContent: (name) => ipcRenderer.invoke("list-profile-content", name),
   createProfile: (name) => ipcRenderer.invoke("create-profile", name),
   renameProfile: (oldName, newName) => ipcRenderer.invoke("rename-profile", { oldName, newName }),
   deleteProfile: (name) => ipcRenderer.invoke("delete-profile", name),
