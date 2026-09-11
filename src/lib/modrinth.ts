@@ -75,9 +75,27 @@ export interface VersionFile {
 
 export interface ModrinthGalleryItem {
   url: string;
+  raw_url?: string | null;
   featured?: boolean;
   title?: string | null;
   description?: string | null;
+}
+
+/** Полный кадр с CDN, без кропа и без уменьшенных превью. */
+export function fullImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    u.searchParams.delete("width");
+    u.searchParams.delete("height");
+    u.searchParams.delete("w");
+    u.searchParams.delete("h");
+    u.searchParams.delete("size");
+    u.searchParams.delete("fit");
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 export interface ModrinthProject {

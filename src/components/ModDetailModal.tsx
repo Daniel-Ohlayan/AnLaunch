@@ -4,6 +4,7 @@ import {
   PROJECT_TYPE_LABELS,
   formatDownloads,
   formatSize,
+  fullImageUrl,
   getProject,
   getProjectVersions,
   loaderLabel,
@@ -64,7 +65,12 @@ function MdBody({ text }: { text: string }) {
       {blocks.map((b, i) => {
         if (b.type === "img") {
           return (
-            <img key={i} src={b.text} alt="" className="max-h-64 w-full rounded-xl object-cover" />
+            <img
+              key={i}
+              src={fullImageUrl(b.text)}
+              alt=""
+              className="mx-auto max-h-[28rem] w-auto max-w-full rounded-xl object-contain"
+            />
           );
         }
         if (b.type === "code") {
@@ -121,6 +127,7 @@ export default function ModDetailModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hero, setHero] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,8 +138,8 @@ export default function ModDetailModal({
         if (cancelled) return;
         setProject(p);
         setVersions(vs);
-        const featured = p.gallery?.find((g) => g.featured)?.url || p.gallery?.[0]?.url || null;
-        setHero(featured);
+        const first = p.gallery?.find((g) => g.featured) || p.gallery?.[0];
+        setHero(fullImageUrl(first?.raw_url || first?.url) || null);
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Не удалось загрузить проект");
@@ -324,6 +331,19 @@ export default function ModDetailModal({
           )}
         </div>
       </div>
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <img
+            src={lightbox}
+            alt=""
+            className="max-h-full max-w-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
