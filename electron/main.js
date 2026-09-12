@@ -44,11 +44,25 @@ try {
 let mainWindow = null;
 let isDev = false;
 
+const { describeError, friendlyError } = require("./friendlyError");
+
+function showAppError(error) {
+  const { title, message } = describeError(error);
+  try {
+    dialog.showErrorBox(title, message);
+  } catch {
+    /* диалог недоступен на самом старте */
+  }
+}
+
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
-  if (mainWindow) {
-    dialog.showErrorBox("Ошибка AnLaunch", error.stack || error.message);
-  }
+  showAppError(error);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("Unhandled Rejection:", error);
+  showAppError(error);
 });
 
 function createWindow() {
@@ -586,6 +600,7 @@ function downloadWithChromium(url, destPath) {
     request.setHeader("User-Agent", "AnLaunch/1.0.3 (https://github.com/Daniel-Ohlayan/AnLaunch)");
     request.setHeader("Accept", "*/*");
     const file = fs.createWriteStream(destPath);
+    file.on("error", (err) => fail(err));
     let settled = false;
     const fail = (err) => {
       if (settled) return;
@@ -600,6 +615,7 @@ function downloadWithChromium(url, destPath) {
         reject(err);
       });
     };
+    file.on("error", fail);
     request.on("response", (response) => {
       const code = response.statusCode;
       if (code !== 200) {
@@ -655,16 +671,7 @@ ipcMain.handle("download-mod-to-profile", async (_event, { profile, fileName, ur
     await downloadModFile(url, destPath);
     return { success: true, path: destPath };
   } catch (err) {
-    const msg = String(err && err.message ? err.message : err);
-    const mapped =
-      /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)
-        ? "Нет доступа к CDN Modrinth. Проверьте интернет или VPN."
-        : /ETIMEDOUT|timeout|Таймаут/i.test(msg)
-          ? "Таймаут скачивания. Попробуйте ещё раз."
-          : /HTTP 403|HTTP 401/i.test(msg)
-            ? "Modrinth отклонил скачивание. Попробуйте ещё раз через минуту."
-            : msg;
-    return { success: false, error: mapped };
+    return { success: false, error: friendlyError(err) };
   }
 });
 
@@ -788,8 +795,9 @@ ipcMain.handle("launch-minecraft-real", async (_event, config) => {
     return { ...result, profile: resolved.name };
   } catch (err) {
     console.error("Launch error:", err);
-    appendLog("error", err.message);
-    return { success: false, message: `Ошибка запуска: ${err.message}`, profile: resolved.name };
+    const text = friendlyError(err);
+    appendLog("error", text);
+    return { success: false, message: text, profile: resolved.name };
   }
 });
 

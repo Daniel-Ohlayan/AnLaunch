@@ -48,6 +48,7 @@ function downloadFile(url, destPath, redirects = 0) {
       } catch {}
       reject(err);
     };
+    file.on("error", fail);
     const req = httpGet(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
@@ -569,6 +570,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
                 got = true;
                 break;
               } catch (e) {
+                if (e && (e.code === "ENOSPC" || /ENOSPC|no space left/i.test(String(e.message)))) throw e;
                 lastErr = e;
               }
             }
