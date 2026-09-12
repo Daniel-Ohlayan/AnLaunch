@@ -680,8 +680,8 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
             const objPath = path.join(assetsDir, "objects", subHash, hash);
             try {
               await downloadFile(`https://resources.download.minecraft.net/${subHash}/${hash}`, objPath);
-            } catch {
-              /* пропускаем сбойные */
+            } catch (e) {
+              if (e && (e.code === "ENOSPC" || /ENOSPC|no space left/i.test(String(e.message || e)))) throw e;
             }
             if (assetData.map_to_resources || assetIndex.id === "legacy" || assetIndex.id === "pre-1.6") {
               const legacyPath = path.join(assetsDir, "virtual", "legacy", name);
