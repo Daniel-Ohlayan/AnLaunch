@@ -568,50 +568,103 @@ ipcMain.handle("delete-profile", async (_event, name) => {
   }
 });
 
+function safeDownloadName(name) {
+  const base = path.basename(String(name || "mod.jar"));
+  const cleaned = base.replace(/[<>:"|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "");
+  return cleaned || "mod.jar";
+}
+
+function downloadWithChromium(url, destPath) {
+  const { net, session } = require("electron");
+  return new Promise((resolve, reject) => {
+    const request = net.request({
+      method: "GET",
+      url,
+      session: session.defaultSession,
+      redirect: "follow",
+    });
+    request.setHeader("User-Agent", "AnLaunch/1.0.3 (https://github.com/Daniel-Ohlayan/AnLaunch)");
+    request.setHeader("Accept", "*/*");
+    const file = fs.createWriteStream(destPath);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try {
+        request.abort();
+      } catch {}
+      file.close(() => {
+        try {
+          fs.unlinkSync(destPath);
+        } catch {}
+        reject(err);
+      });
+    };
+    request.on("response", (response) => {
+      const code = response.statusCode;
+      if (code !== 200) {
+        fail(new Error(`Не удалось скачать файл (HTTP ${code})`));
+        return;
+      }
+      response.on("data", (chunk) => file.write(chunk));
+      response.on("end", () => {
+        file.end(() => {
+          if (settled) return;
+          settled = true;
+          resolve(destPath);
+        });
+      });
+      response.on("error", fail);
+    });
+    request.on("error", fail);
+    request.end();
+  });
+}
+
+async function downloadModFile(url, destPath) {
+  const { downloadFile } = require("./launcher");
+  let lastErr = null;
+  try {
+    await downloadWithChromium(url, destPath);
+    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) return;
+    try {
+      fs.unlinkSync(destPath);
+    } catch {}
+    lastErr = new Error("Файл скачался пустым");
+  } catch (err) {
+    lastErr = err;
+  }
+  await downloadFile(url, destPath);
+  if (!fs.existsSync(destPath) || !fs.statSync(destPath).size) {
+    try {
+      fs.unlinkSync(destPath);
+    } catch {}
+    throw lastErr || new Error("Файл скачался пустым");
+  }
+}
+
 // Скачивание файла напрямую в папку профиля (mods, resourcepacks, shaderpacks, datapacks)
 ipcMain.handle("download-mod-to-profile", async (_event, { profile, fileName, url, subfolder }) => {
-  const https = require("https");
-  const http = require("http");
   const { ensureProfile } = require("./profiles");
-
   try {
+    if (!url) return { success: false, error: "Нет ссылки на файл Modrinth" };
     const { dir } = ensureProfile(app.getPath("userData"), profile || "Default");
     const targetDir = path.join(dir, subfolder || "mods");
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    const destPath = path.join(targetDir, fileName);
-
-    await new Promise((resolve, reject) => {
-      const download = (u, redirects = 0) => {
-        if (redirects > 5) return reject(new Error("Слишком много редиректов"));
-        const proto = u.startsWith("https") ? https : http;
-        const file = fs.createWriteStream(destPath);
-        proto
-          .get(u, (res) => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-              file.close();
-              fs.unlink(destPath, () => {});
-              return download(res.headers.location, redirects + 1);
-            }
-            if (res.statusCode !== 200) {
-              file.close();
-              fs.unlink(destPath, () => {});
-              return reject(new Error(`HTTP ${res.statusCode}`));
-            }
-            res.pipe(file);
-            file.on("finish", () => file.close(resolve));
-          })
-          .on("error", (err) => {
-            file.close();
-            fs.unlink(destPath, () => {});
-            reject(err);
-          });
-      };
-      download(url);
-    });
-
+    const destPath = path.join(targetDir, safeDownloadName(fileName));
+    await downloadModFile(url, destPath);
     return { success: true, path: destPath };
   } catch (err) {
-    return { success: false, error: err.message };
+    const msg = String(err && err.message ? err.message : err);
+    const mapped =
+      /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)
+        ? "Нет доступа к CDN Modrinth. Проверьте интернет или VPN."
+        : /ETIMEDOUT|timeout|Таймаут/i.test(msg)
+          ? "Таймаут скачивания. Попробуйте ещё раз."
+          : /HTTP 403|HTTP 401/i.test(msg)
+            ? "Modrinth отклонил скачивание. Попробуйте ещё раз через минуту."
+            : msg;
+    return { success: false, error: mapped };
   }
 });
 

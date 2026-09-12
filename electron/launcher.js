@@ -16,36 +16,62 @@ function getProto(url) {
   return url.startsWith("https") ? https : http;
 }
 
-const HTTP_HEADERS = { "User-Agent": "AnLaunch/1.0.3", Accept: "*/*" };
+const HTTP_HEADERS = {
+  "User-Agent": "AnLaunch/1.0.3 (https://github.com/Daniel-Ohlayan/AnLaunch)",
+  Accept: "*/*",
+};
+
+function absUrl(from, location) {
+  try {
+    return new URL(location, from).href;
+  } catch {
+    return location;
+  }
+}
 
 function httpGet(url, callback) {
-  return getProto(url).get(url, { headers: HTTP_HEADERS }, callback);
+  return getProto(url).get(url, { headers: HTTP_HEADERS, timeout: 120000 }, callback);
 }
 
 function downloadFile(url, destPath, redirects = 0) {
   return new Promise((resolve, reject) => {
-    if (redirects > 5) return reject(new Error("Too many redirects"));
+    if (redirects > 8) return reject(new Error("Слишком много редиректов"));
+    if (!url) return reject(new Error("Нет ссылки на файл"));
     ensureDir(path.dirname(destPath));
     const file = fs.createWriteStream(destPath);
-    httpGet(url, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          file.close();
-          fs.unlink(destPath, () => {});
-          return resolve(downloadFile(res.headers.location, destPath, redirects + 1));
-        }
-        if (res.statusCode !== 200) {
-          file.close();
-          fs.unlink(destPath, () => {});
-          return reject(new Error(`HTTP ${res.statusCode} для ${url}`));
-        }
-        res.pipe(file);
-        file.on("finish", () => file.close(() => resolve(destPath)));
-      })
-      .on("error", (err) => {
+    const fail = (err) => {
+      try {
         file.close();
-        fs.unlink(destPath, () => {});
-        reject(err);
-      });
+      } catch {}
+      try {
+        fs.unlinkSync(destPath);
+      } catch {}
+      reject(err);
+    };
+    const req = httpGet(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        file.close(() => {
+          try {
+            fs.unlinkSync(destPath);
+          } catch {}
+          resolve(downloadFile(absUrl(url, res.headers.location), destPath, redirects + 1));
+        });
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        fail(new Error(`Не удалось скачать файл (HTTP ${res.statusCode})`));
+        return;
+      }
+      res.pipe(file);
+      file.on("finish", () => file.close(() => resolve(destPath)));
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      fail(new Error("Таймаут скачивания"));
+    });
+    req.on("error", fail);
   });
 }
 
@@ -1151,4 +1177,4 @@ function stopMinecraft() {
   }
 }
 
-module.exports = { launchMinecraft, ensureDir, stopMinecraft, isGameRunning };
+module.exports = { launchMinecraft, ensureDir, downloadFile, stopMinecraft, isGameRunning };
