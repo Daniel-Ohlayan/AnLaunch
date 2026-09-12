@@ -140,6 +140,44 @@ export default function ModsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProfile, tab]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveIcons() {
+      if (!diskFiles.length) {
+        setFileMeta({});
+        return;
+      }
+      const hashes = diskFiles.map((f) => f.sha1).filter(Boolean) as string[];
+      let byHash: Record<string, FileProjectMeta> = {};
+      if (hashes.length) {
+        try {
+          byHash = await identifyModsByHashes(hashes);
+        } catch {
+          byHash = {};
+        }
+      }
+      const next: Record<string, FileProjectMeta> = {};
+      for (const f of diskFiles) {
+        if (cancelled) return;
+        if (f.sha1 && byHash[f.sha1]) {
+          next[f.fileName] = byHash[f.sha1];
+          continue;
+        }
+        try {
+          const meta = await identifyModByFilename(f.fileName, f.projectType as ProjectType, loader);
+          if (meta) next[f.fileName] = meta;
+        } catch {
+          /* нет на Modrinth */
+        }
+      }
+      if (!cancelled) setFileMeta(next);
+    }
+    resolveIcons();
+    return () => {
+      cancelled = true;
+    };
+  }, [diskFiles, loader]);
+
   async function runSearch(q?: string, p?: number) {
     if (!availableTypes.includes(projectType)) {
       setResults([]);

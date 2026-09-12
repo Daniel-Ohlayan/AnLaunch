@@ -125,6 +125,7 @@ export default function App() {
     label: "",
   });
   const [launchStatus, setLaunchStatus] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [gameRunning, setGameRunning] = useState(false);
   const [homeSettingsOpen, setHomeSettingsOpen] = useState(false);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
   const [homeSettings, setHomeSettings] = useState<HomeSettings>(() => {
@@ -143,6 +144,19 @@ export default function App() {
     const account = getActiveAccount();
     setActiveAccount(account);
     refreshProfiles();
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onGameExited) return;
+    const unsub = window.electronAPI.onGameExited(() => {
+      setGameRunning(false);
+      setLaunchStatus("idle");
+      addLog("info", "Minecraft закрыт");
+    });
+    window.electronAPI.isGameRunning?.().then((running) => {
+      if (running) setGameRunning(true);
+    });
+    return unsub;
   }, []);
 
   // Сохранение home settings
@@ -385,7 +399,7 @@ export default function App() {
   }
 
   async function launch() {
-    if (launchStatus === "running") return;
+    if (launchStatus === "running" || gameRunning) return;
     if (!activeAccount) {
       setAccountsOpen(true);
       return;
@@ -484,6 +498,7 @@ export default function App() {
         }
 
         if (result.success) {
+          setGameRunning(true);
           if (closeOnLaunch) {
             addLog("success", result.message);
             window.electronAPI?.quitApp();
@@ -494,6 +509,7 @@ export default function App() {
           setLaunchStatus("success");
           setLaunching((l) => ({
             ...l,
+            open: false,
             progress: 100,
             label: `✅ ${result.message}`,
           }));
@@ -548,6 +564,19 @@ export default function App() {
     setTimeout(tick, 600);
   }
 
+  async function stopGame() {
+    if (!window.electronAPI?.stopMinecraft) return;
+    addLog("info", "Остановка Minecraft…");
+    const r = await window.electronAPI.stopMinecraft();
+    if (r?.success) {
+      setGameRunning(false);
+      setLaunchStatus("idle");
+      addLog("success", "Minecraft закрыт");
+    } else {
+      addLog("warn", r?.error || "Не удалось закрыть игру");
+    }
+  }
+
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-[#06070a]">
       {/* Animated aurora background */}
@@ -582,6 +611,8 @@ export default function App() {
               activeAccount={activeAccount}
               activeProfile={activeProfile}
               onLaunch={launch}
+              onStop={stopGame}
+              gameRunning={gameRunning}
               javaPath={javaPath}
               installedCount={
                 profiles.find((p) => p.name === activeProfile)?.mods ??

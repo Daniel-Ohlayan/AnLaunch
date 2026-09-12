@@ -2,6 +2,10 @@
 // Docs: https://docs.modrinth.com/
 
 const BASE = "https://api.modrinth.com/v2";
+const MR_HEADERS: HeadersInit = {
+  Accept: "application/json",
+  "User-Agent": "AnLaunch/1.0.3 (https://github.com/Daniel-Ohlayan/AnLaunch)",
+};
 
 export type ModLoader = "fabric" | "forge" | "quilt" | "neoforge" | "vanilla";
 
@@ -127,7 +131,7 @@ export interface ModrinthProject {
 
 export async function getProject(idOrSlug: string): Promise<ModrinthProject> {
   const res = await fetch(`${BASE}/project/${encodeURIComponent(idOrSlug)}`, {
-    headers: { Accept: "application/json" },
+    headers: MR_HEADERS,
   });
   if (!res.ok) throw new Error(`Modrinth project failed: ${res.status}`);
   return res.json();
@@ -183,7 +187,7 @@ export async function searchMods(params: {
   url.searchParams.set("facets", JSON.stringify(facets));
 
   const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+    headers: MR_HEADERS,
   });
   if (!res.ok) throw new Error(`Modrinth search failed: ${res.status}`);
   return res.json();
@@ -206,7 +210,7 @@ export async function getProjectVersions(
   }
 
   const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+    headers: MR_HEADERS,
   });
   if (!res.ok) throw new Error(`Modrinth versions failed: ${res.status}`);
   return res.json();
@@ -342,7 +346,7 @@ export async function identifyModsByHashes(hashes: string[]): Promise<Record<str
   if (!unique.length) return {};
   const res = await fetch(`${BASE}/version_files`, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { ...MR_HEADERS, "Content-Type": "application/json" },
     body: JSON.stringify({ hashes: unique, algorithm: "sha1" }),
   });
   if (!res.ok) return {};
@@ -350,7 +354,7 @@ export async function identifyModsByHashes(hashes: string[]): Promise<Record<str
   const ids = [...new Set(Object.values(versions).map((v) => v.project_id).filter(Boolean))] as string[];
   if (!ids.length) return {};
   const pres = await fetch(`${BASE}/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`, {
-    headers: { Accept: "application/json" },
+    headers: MR_HEADERS,
   });
   if (!pres.ok) return {};
   const projects = (await pres.json()) as ModrinthProject[];
@@ -386,12 +390,35 @@ export async function identifyModByFilename(
 ): Promise<FileProjectMeta | null> {
   const slug = guessModSlug(fileName);
   if (!slug || slug.length < 2) return null;
+  const candidates = [slug.replace(/_/g, "-")];
+  if (/-(fabric|forge|quilt|neoforge)$/i.test(candidates[0])) {
+    candidates.push(candidates[0].replace(/-(fabric|forge|quilt|neoforge)$/i, ""));
+  }
+  for (const id of candidates) {
+    if (id.length < 2) continue;
+    try {
+      const p = await getProject(id);
+      if (p?.icon_url || p?.title) {
+        return {
+          project_id: p.id,
+          slug: p.slug,
+          title: p.title,
+          description: p.description,
+          icon_url: p.icon_url,
+        };
+      }
+    } catch {
+      /* slug не совпал */
+    }
+  }
   try {
-    const data = await searchMods({ query: slug, projectType, loader, limit: 5, index: "relevance" });
+    const data = await searchMods({ query: slug, projectType, loader, limit: 8, index: "relevance" });
+    const norm = (s: string) => s.toLowerCase().replace(/[-_\s]/g, "");
+    const key = norm(slug);
     const hit =
-      data.hits.find((h) => h.slug === slug || h.slug.replace(/-/g, "") === slug.replace(/[-_]/g, "")) ||
-      data.hits.find((h) => h.title.toLowerCase().replace(/\s+/g, "") === slug.toLowerCase().replace(/[-_]/g, "")) ||
-      data.hits[0];
+      data.hits.find((h) => norm(h.slug) === key) ||
+      data.hits.find((h) => norm(h.title) === key) ||
+      data.hits.find((h) => norm(h.slug).includes(key) || key.includes(norm(h.slug)));
     if (!hit) return null;
     return {
       project_id: hit.project_id,

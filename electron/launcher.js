@@ -892,6 +892,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, JAVA_TOOL_OPTIONS: "" },
   });
+  gameChild = child;
 
   let started = false;
   let errBuffer = "";
@@ -934,10 +935,13 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
     });
 
     child.on("error", (err) => {
+      if (gameChild === child) gameChild = null;
       resolve({ success: false, message: `Ошибка запуска Java: ${err.message}` });
     });
 
     child.on("exit", (code) => {
+      if (gameChild === child) gameChild = null;
+      notifyGameExited(code);
       if (started) return;
       if (code === 0) {
         resolve({ success: true, message: "Minecraft закрыт." });
@@ -1104,4 +1108,47 @@ function getRequiredJavaVersionSafe(details) {
   }
 }
 
-module.exports = { launchMinecraft, ensureDir };
+let gameChild = null;
+
+function isGameRunning() {
+  return !!(gameChild && gameChild.exitCode == null && !gameChild.killed);
+}
+
+function notifyGameExited(code) {
+  try {
+    const { BrowserWindow } = require("electron");
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send("game-exited", { code });
+    }
+  } catch {
+    /* renderer ещё не готов */
+  }
+}
+
+function stopMinecraft() {
+  const child = gameChild;
+  if (!child || child.exitCode != null) {
+    return { success: false, error: "Игра не запущена" };
+  }
+  const pid = child.pid;
+  try {
+    if (process.platform === "win32" && pid) {
+      try {
+        execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", windowsHide: true });
+      } catch {
+        child.kill();
+      }
+    } else {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* already gone */
+      }
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+module.exports = { launchMinecraft, ensureDir, stopMinecraft, isGameRunning };

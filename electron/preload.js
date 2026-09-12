@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setAutoStart: (enabled) => ipcRenderer.invoke("set-auto-start", enabled),
   getAutoStart: () => ipcRenderer.invoke("get-auto-start"),
   launchMinecraftReal: (config) => ipcRenderer.invoke("launch-minecraft-real", config),
+  stopMinecraft: () => ipcRenderer.invoke("stop-minecraft"),
+  isGameRunning: () => ipcRenderer.invoke("is-game-running"),
+  onGameExited: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("game-exited", handler);
+    return () => ipcRenderer.removeListener("game-exited", handler);
+  },
 
   // Профили
   listProfiles: () => ipcRenderer.invoke("list-profiles"),

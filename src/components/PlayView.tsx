@@ -3,7 +3,7 @@ import type { ModLoader } from "../lib/modrinth";
 import { ruCount } from "../lib/modrinth";
 import type { Account } from "../lib/accounts";
 import type { ProfileInfo } from "../types/electron";
-import { PlayIcon } from "./icons";
+import { CloseIcon, PlayIcon } from "./icons";
 import ProfilesBar from "./ProfilesBar";
 import type { HomeSettings } from "./HomeSettingsModal";
 import { getAccent } from "../lib/accent";
@@ -15,6 +15,8 @@ export default function PlayView({
   activeAccount,
   activeProfile,
   onLaunch,
+  onStop,
+  gameRunning,
   javaPath,
   installedCount,
   profiles,
@@ -35,6 +37,8 @@ export default function PlayView({
   activeAccount: Account | null;
   activeProfile: string;
   onLaunch: () => void;
+  onStop?: () => void;
+  gameRunning?: boolean;
   javaPath?: string;
   installedCount?: number;
   profiles: ProfileInfo[];
@@ -85,8 +89,8 @@ export default function PlayView({
 
         <div className="relative flex h-full flex-col justify-between p-8">
           <div className="flex items-center gap-2">
-            <span className={`rounded-full border ${accent.border} ${accent.bg} px-3 py-1 text-[11px] font-semibold uppercase tracking-wider ${accent.text}`}>
-              ● Готов к игре
+            <span className={`rounded-full border ${gameRunning ? "border-red-400/30 bg-red-500/15 text-red-200" : `${accent.border} ${accent.bg} ${accent.text}`} px-3 py-1 text-[11px] font-semibold uppercase tracking-wider`}>
+              {gameRunning ? "● Игра запущена" : "● Готов к игре"}
             </span>
             <button
               onClick={onOpenHomeSettings}
@@ -201,12 +205,16 @@ export default function PlayView({
         </div>
 
         <button
-          onClick={onLaunch}
-          disabled={!activeAccount}
-          className={`group flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r ${accentClass} text-lg font-bold text-[#06070a] transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-white/[0.06] disabled:to-white/[0.06] disabled:text-white/30 animate-glow`}
+          onClick={gameRunning ? onStop : onLaunch}
+          disabled={!gameRunning && !activeAccount}
+          className={`group flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r text-lg font-bold transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-white/[0.06] disabled:to-white/[0.06] disabled:text-white/30 ${
+            gameRunning
+              ? "from-red-500 to-rose-600 text-white"
+              : `${accentClass} text-[#06070a] animate-glow`
+          }`}
         >
-          <PlayIcon className="h-6 w-6" />
-          {!activeAccount ? "Выберите аккаунт" : "ЗАПУСТИТЬ"}
+          {gameRunning ? <CloseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
+          {gameRunning ? "ВЫЙТИ" : !activeAccount ? "Выберите аккаунт" : "ЗАПУСТИТЬ"}
         </button>
       </div>
 

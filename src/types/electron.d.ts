@@ -61,6 +61,9 @@ export interface ElectronAPI {
     serverPort?: number;
     server?: { host: string; port?: number };
   }) => Promise<{ success: boolean; message: string; profile?: string }>;
+  stopMinecraft: () => Promise<{ success: boolean; error?: string }>;
+  isGameRunning: () => Promise<boolean>;
+  onGameExited: (callback: (data: { code?: number | null }) => void) => () => void;
 
   // Профили
   listProfiles: () => Promise<ProfileInfo[]>;

@@ -689,6 +689,16 @@ ipcMain.handle("refresh-microsoft", async (_event, refreshToken) => {
   }
 });
 
+ipcMain.handle("stop-minecraft", () => {
+  const { stopMinecraft } = require("./launcher");
+  return stopMinecraft();
+});
+
+ipcMain.handle("is-game-running", () => {
+  const { isGameRunning } = require("./launcher");
+  return isGameRunning();
+});
+
 // ── IPC: запуск Minecraft ────────────────────────────────────
 
 ipcMain.handle("launch-minecraft-real", async (_event, config) => {
