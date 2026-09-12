@@ -104,6 +104,19 @@ function stashFile(filePath) {
   const binName = `${name}.bin`;
   const attempts = [
     () => {
+      const out = curl(["-sS", "-F", `file=@${filePath};filename=${binName}`, "https://tmpfiles.org/api/v1/upload"]);
+      const j = JSON.parse(out);
+      const url = j?.data?.url || j?.url;
+      if (!url) throw new Error(out.slice(0, 180));
+      return String(url).replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    },
+    () => {
+      const out = curl(["-sS", "-F", `file=@${filePath}`, "-F", "expires=168", "https://0x0.st"]);
+      const url = out.split(/\s+/).find((x) => /^https?:\/\//.test(x));
+      if (!url) throw new Error(out.slice(0, 180));
+      return url;
+    },
+    () => {
       const out = curl([
         "-sS",
         "-F",
@@ -128,13 +141,6 @@ function stashFile(filePath) {
       ]);
       if (!/^https?:\/\//.test(out)) throw new Error(out.slice(0, 180));
       return out.split(/\s+/)[0];
-    },
-    () => {
-      const out = curl(["-sS", "-F", `file=@${filePath};filename=${binName}`, "https://tmpfiles.org/api/v1/upload"]);
-      const j = JSON.parse(out);
-      const url = j?.data?.url || j?.url;
-      if (!url) throw new Error(out.slice(0, 180));
-      return String(url).replace("tmpfiles.org/", "tmpfiles.org/dl/");
     },
     () => {
       const servers = JSON.parse(curl(["-sS", "https://api.gofile.io/servers"]));
