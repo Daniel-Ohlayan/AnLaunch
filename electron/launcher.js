@@ -578,6 +578,7 @@ async function launchMinecraft(config, javaPath, dirs, onProgress) {
             if (item.type === "lib") classpath.push(item.path);
             else if (item.type === "native") nativeFiles.push(item.path);
           } catch (e) {
+            if (e && (e.code === "ENOSPC" || /ENOSPC|no space left/i.test(String(e.message || e)))) throw e;
             console.error(`Не скачано (${item.type}):`, item.libName, e.message);
           }
           done++;
