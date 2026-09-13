@@ -193,6 +193,8 @@ export async function searchMods(params: {
   return res.json();
 }
 
+const versionsCache = new Map<string, { at: number; data: ProjectVersion[] }>();
+
 export async function getProjectVersions(
   projectId: string,
   options?: { loader?: ModLoader; gameVersion?: string; projectType?: ProjectType }
@@ -209,11 +211,17 @@ export async function getProjectVersions(
     url.searchParams.set("loaders", JSON.stringify([options.loader]));
   }
 
-  const res = await fetch(url.toString(), {
+  const key = url.toString();
+  const hit = versionsCache.get(key);
+  if (hit && Date.now() - hit.at < 90_000) return hit.data;
+
+  const res = await fetch(key, {
     headers: MR_HEADERS,
   });
   if (!res.ok) throw new Error(`Modrinth versions failed: ${res.status}`);
-  return res.json();
+  const data = (await res.json()) as ProjectVersion[];
+  versionsCache.set(key, { at: Date.now(), data });
+  return data;
 }
 
 export function findCompatibleFile(

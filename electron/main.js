@@ -600,11 +600,15 @@ function downloadWithChromium(url, destPath) {
     request.setHeader("User-Agent", "AnLaunch/1.0.3 (https://github.com/Daniel-Ohlayan/AnLaunch)");
     request.setHeader("Accept", "*/*");
     const file = fs.createWriteStream(destPath);
-    file.on("error", (err) => fail(err));
     let settled = false;
+    let gotData = false;
+    const firstByteTimer = setTimeout(() => {
+      if (!gotData) fail(new Error("Таймаут скачивания"));
+    }, 8000);
     const fail = (err) => {
       if (settled) return;
       settled = true;
+      clearTimeout(firstByteTimer);
       try {
         request.abort();
       } catch {}
@@ -622,11 +626,17 @@ function downloadWithChromium(url, destPath) {
         fail(new Error(`Не удалось скачать файл (HTTP ${code})`));
         return;
       }
-      response.on("data", (chunk) => file.write(chunk));
+      response.on("data", (chunk) => {
+        if (settled) return;
+        gotData = true;
+        clearTimeout(firstByteTimer);
+        file.write(chunk);
+      });
       response.on("end", () => {
         file.end(() => {
           if (settled) return;
           settled = true;
+          clearTimeout(firstByteTimer);
           resolve(destPath);
         });
       });
@@ -649,6 +659,9 @@ async function downloadModFile(url, destPath) {
     lastErr = new Error("Файл скачался пустым");
   } catch (err) {
     lastErr = err;
+    try {
+      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+    } catch {}
   }
   await downloadFile(url, destPath);
   if (!fs.existsSync(destPath) || !fs.statSync(destPath).size) {

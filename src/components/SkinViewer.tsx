@@ -87,7 +87,8 @@ function renderSkin(
   yawDeg: number,
   pitchDeg: number,
   slim: boolean,
-  layers: boolean
+  layers: boolean,
+  cape?: HTMLImageElement | null
 ) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -169,6 +170,21 @@ function renderSkin(
       cuboid(img, -2, 12, 0, 4.5, 12.5, 4.5, { r: [0, 52, 4, 12], f: [4, 52, 4, 12], l: [8, 52, 4, 12], b: [12, 52, 4, 12], t: [4, 48, 4, 4], d: [8, 48, 4, 4] }, 1)
     );
   }
+  if (cape) {
+    parts.push(
+      cuboid(
+        cape,
+        0,
+        1,
+        -3.1,
+        10,
+        16,
+        0.5,
+        { r: [0, 1, 1, 16], f: [12, 1, 10, 16], l: [11, 1, 1, 16], b: [1, 1, 10, 16], t: [1, 0, 10, 1], d: [11, 0, 10, 1] },
+        1
+      )
+    );
+  }
 
   const drawn: { z: number; draw: () => void }[] = [];
   for (const box of parts) {
@@ -182,7 +198,7 @@ function renderSkin(
       const u = face.uv;
       drawn.push({
         z,
-        draw: () => drawFace(ctx, img, u[0], u[1], u[2], u[3], a, b, d),
+        draw: () => drawFace(ctx, box.img, u[0], u[1], u[2], u[3], a, b, d),
       });
     }
   }
@@ -224,12 +240,16 @@ export default function SkinViewer({
 }) {
   const [mode, setMode] = useState<"3d" | "unwrap">("3d");
   const [layers, setLayers] = useState(true);
+  const [spin, setSpin] = useState(true);
   const [norm, setNorm] = useState<string | undefined>(undefined);
   const yawRef = useRef(28);
   const pitchRef = useRef(-12);
+  const autoSpin = useRef(true);
+  autoSpin.current = spin;
   const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const capeRef = useRef<HTMLImageElement | null>(null);
   const layersRef = useRef(layers);
   const slimRef = useRef(!!slim);
   layersRef.current = layers;
@@ -270,21 +290,37 @@ export default function SkinViewer({
   }, [tex]);
 
   useEffect(() => {
+    capeRef.current = null;
+    if (!cape) return;
+    let cancelled = false;
+    loadImage(cape)
+      .then((img) => {
+        if (!cancelled) capeRef.current = img;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [cape]);
+
+  useEffect(() => {
     if (mode !== "3d") return;
     let id = 0;
     let last = performance.now();
     const tick = (t: number) => {
       const dt = t - last;
       last = t;
-      if (!drag.current) yawRef.current += dt * 0.018;
+      if (!drag.current && autoSpin.current) yawRef.current += dt * 0.018;
       const canvas = canvasRef.current;
       const img = imgRef.current;
-      if (canvas && img) renderSkin(canvas, img, yawRef.current, pitchRef.current, slimRef.current, layersRef.current);
+      if (canvas && img) {
+        renderSkin(canvas, img, yawRef.current, pitchRef.current, slimRef.current, layersRef.current, capeRef.current);
+      }
       id = requestAnimationFrame(tick);
     };
     id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [mode, tex]);
+  }, [mode, tex, cape]);
 
   return (
     <div className="rounded-xl border border-white/[0.08] bg-black/30 p-3">
@@ -329,21 +365,29 @@ export default function SkinViewer({
         <UnwrapCanvas src={tex} />
       ) : (
         <div
-          className="relative cursor-grab rounded-lg bg-[radial-gradient(circle_at_50%_30%,#1a1d27,transparent_70%)] active:cursor-grabbing"
+          className="relative cursor-grab touch-none rounded-lg bg-[radial-gradient(circle_at_50%_30%,#1a1d27,transparent_70%)] select-none active:cursor-grabbing"
           onPointerDown={(e) => {
+            e.preventDefault();
             (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-            drag.current = { x: e.clientX, y: e.clientY, yaw, pitch };
+            if (spin) setSpin(false);
+            drag.current = { x: e.clientX, y: e.clientY, yaw: yawRef.current, pitch: pitchRef.current };
           }}
           onPointerMove={(e) => {
             if (!drag.current) return;
-            setYaw(drag.current.yaw + (e.clientX - drag.current.x) * 0.5);
-            setPitch(Math.max(-35, Math.min(20, drag.current.pitch + (e.clientY - drag.current.y) * 0.3)));
+            yawRef.current = drag.current.yaw + (e.clientX - drag.current.x) * 0.55;
+            pitchRef.current = Math.max(-40, Math.min(25, drag.current.pitch + (e.clientY - drag.current.y) * 0.35));
           }}
           onPointerUp={() => {
             drag.current = null;
           }}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
         >
           <canvas ref={canvasRef} width={280} height={340} className="mx-auto block h-[260px] w-auto" />
+          <div className="pointer-events-none absolute bottom-2 left-0 right-0 text-center text-[10px] text-white/35">
+            Перетащите, чтобы повернуть
+          </div>
           {cape ? <span className="sr-only">Плащ</span> : null}
         </div>
       )}

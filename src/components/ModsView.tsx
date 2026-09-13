@@ -147,7 +147,9 @@ export default function ModsView({
         setFileMeta({});
         return;
       }
-      const hashes = diskFiles.map((f) => f.sha1).filter(Boolean) as string[];
+      const knownNames = new Set(profileMods.map((m) => m.fileName));
+      const unknown = diskFiles.filter((f) => !knownNames.has(f.fileName));
+      const hashes = unknown.map((f) => f.sha1).filter(Boolean) as string[];
       let byHash: Record<string, FileProjectMeta> = {};
       if (hashes.length) {
         try {
@@ -157,18 +159,25 @@ export default function ModsView({
         }
       }
       const next: Record<string, FileProjectMeta> = {};
-      for (const f of diskFiles) {
+      const needName = unknown.filter((f) => !(f.sha1 && byHash[f.sha1]));
+      for (let i = 0; i < needName.length; i += 4) {
         if (cancelled) return;
-        if (f.sha1 && byHash[f.sha1]) {
-          next[f.fileName] = byHash[f.sha1];
-          continue;
+        const batch = needName.slice(i, i + 4);
+        const found = await Promise.all(
+          batch.map(async (f) => {
+            try {
+              return [f.fileName, await identifyModByFilename(f.fileName, f.projectType as ProjectType, loader)] as const;
+            } catch {
+              return [f.fileName, null] as const;
+            }
+          })
+        );
+        for (const [name, meta] of found) {
+          if (meta) next[name] = meta;
         }
-        try {
-          const meta = await identifyModByFilename(f.fileName, f.projectType as ProjectType, loader);
-          if (meta) next[f.fileName] = meta;
-        } catch {
-          /* нет на Modrinth */
-        }
+      }
+      for (const f of unknown) {
+        if (f.sha1 && byHash[f.sha1]) next[f.fileName] = byHash[f.sha1];
       }
       if (!cancelled) setFileMeta(next);
     }
@@ -176,7 +185,9 @@ export default function ModsView({
     return () => {
       cancelled = true;
     };
-  }, [diskFiles, loader]);
+  }, [diskFiles, loader, profileMods]);
+
+  const searchSeq = useRef(0);
 
   async function runSearch(q?: string, p?: number) {
     if (!availableTypes.includes(projectType)) {
@@ -184,6 +195,7 @@ export default function ModsView({
       setTotalHits(0);
       return;
     }
+    const seq = ++searchSeq.current;
     setLoading(true);
     setError(null);
     const offset = (p ?? page) * LIMIT;
@@ -197,13 +209,15 @@ export default function ModsView({
         limit: LIMIT,
         offset,
       });
+      if (seq !== searchSeq.current) return;
       setResults(data.hits);
       setTotalHits(data.total_hits);
     } catch (e) {
+      if (seq !== searchSeq.current) return;
       setError(e instanceof Error ? e.message : "Не удалось получить данные");
       setResults([]);
     } finally {
-      setLoading(false);
+      if (seq === searchSeq.current) setLoading(false);
     }
   }
 
@@ -237,8 +251,6 @@ export default function ModsView({
     setError(null);
     try {
       await onInstall(hit, projectType, version);
-      await refreshDisk();
-      onContentChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка установки");
     } finally {
@@ -247,6 +259,8 @@ export default function ModsView({
         n.delete(hit.project_id);
         return n;
       });
+      refreshDisk().catch(() => {});
+      onContentChanged?.();
     }
   }
 

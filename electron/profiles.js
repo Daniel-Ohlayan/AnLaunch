@@ -118,6 +118,27 @@ function listProfiles(userDataPath) {
   });
 }
 
+const contentHashCache = new Map();
+
+function fileSha1Cached(full, st) {
+  const prev = contentHashCache.get(full);
+  if (prev && prev.size === st.size && prev.mtime === st.mtimeMs) return prev.sha1;
+  const hash = crypto.createHash("sha1");
+  const fd = fs.openSync(full, "r");
+  try {
+    const buf = Buffer.alloc(256 * 1024);
+    let n;
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, n));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  const sha1 = hash.digest("hex");
+  contentHashCache.set(full, { size: st.size, mtime: st.mtimeMs, sha1 });
+  return sha1;
+}
+
 function listProfileContent(userDataPath, profileName) {
   const { dir } = ensureProfile(userDataPath, profileName);
   const mapping = [
@@ -143,9 +164,17 @@ function listProfileContent(userDataPath, profileName) {
       let size = 0;
       let sha1 = null;
       try {
-        size = fs.statSync(full).size;
+        const st = fs.statSync(full);
+        size = st.size;
+        // Не хешируем при каждом списке: только мелкие файлы и только если нет кэша.
+        // Раньше readFileSync всех jar после «Установить» держал кнопку «Установка…».
         if (e.isFile() && size > 0 && size < 80 * 1024 * 1024) {
-          sha1 = crypto.createHash("sha1").update(fs.readFileSync(full)).digest("hex");
+          const cached = contentHashCache.get(full);
+          if (cached && cached.size === st.size && cached.mtime === st.mtimeMs) {
+            sha1 = cached.sha1;
+          } else if (size <= 8 * 1024 * 1024) {
+            sha1 = fileSha1Cached(full, st);
+          }
         }
       } catch {}
       out.push({
