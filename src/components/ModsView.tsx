@@ -729,6 +729,3 @@ function CenteredError({ message, onRetry }: { message: string; onRetry: () => v
 function CenteredMessage({ text }: { text: string }) {
   return <div className="flex h-full items-center justify-center text-sm text-white/40">{text}</div>;
 }
-) {
-  return <div className="flex h-full items-center justify-center text-sm text-white/40">{text}</div>;
-}
