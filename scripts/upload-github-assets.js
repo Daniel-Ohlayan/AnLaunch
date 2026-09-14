@@ -15,6 +15,10 @@ function notice(msg) {
   console.log(`::notice::${String(msg).replace(/\r?\n/g, " ").slice(0, 600)}`);
 }
 
+function errorAnno(msg) {
+  console.log(`::error::${String(msg).replace(/\r?\n/g, " ").slice(0, 600)}`);
+}
+
 function filesToUpload() {
   if (!fs.existsSync(dir)) return [];
   return fs
@@ -173,6 +177,7 @@ function stashFile(filePath) {
       const url = fn();
       urls.push(url);
       notice(`SETUP_FILE ${name} ${url}`);
+      errorAnno(`SETUP_FILE ${name} ${url}`);
     } catch (e) {
       last = e;
       notice(`stash fail ${name}: ${e.message || e}`);
