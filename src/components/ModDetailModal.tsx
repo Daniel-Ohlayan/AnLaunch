@@ -160,10 +160,10 @@ export default function ModDetailModal({
   }, [hit.project_id]);
 
   const filtered = useMemo(() => {
-    if (allVersions) return versions;
+    if (allVersions || projectType === "modpack") return versions;
     return versions.filter((v) => {
       const okVer = !gameVersion || v.game_versions.includes(gameVersion);
-      const needsLoader = projectType === "mod" || projectType === "modpack";
+      const needsLoader = projectType === "mod";
       const okLoader = !needsLoader || !loader || loader === "vanilla" || v.loaders.includes(loader);
       return okVer && okLoader;
     });
@@ -280,13 +280,17 @@ export default function ModDetailModal({
 
               <aside className="flex min-h-0 flex-col border-t border-white/[0.06] bg-black/20 p-4 lg:border-l lg:border-t-0">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/35">Версия файла</div>
-                <label className="mb-3 flex items-center gap-2 text-[11px] text-white/50">
-                  <input type="checkbox" checked={allVersions} onChange={(e) => setAllVersions(e.target.checked)} />
-                  Показать все версии
-                </label>
+                {projectType !== "modpack" && (
+                  <label className="mb-3 flex items-center gap-2 text-[11px] text-white/50">
+                    <input type="checkbox" checked={allVersions} onChange={(e) => setAllVersions(e.target.checked)} />
+                    Показать все версии
+                  </label>
+                )}
                 {filtered.length === 0 ? (
                   <div className="text-xs text-amber-200/80">
-                    Нет файла для {gameVersion} / {loaderLabel(loader)}. Включите «все версии» или смените профиль.
+                    {projectType === "modpack"
+                      ? "Нет файлов модпака."
+                      : `Нет файла для ${gameVersion} / ${loaderLabel(loader)}. Включите «все версии» или смените профиль.`}
                   </div>
                 ) : (
                   <div className="min-h-0 max-h-[22rem] space-y-1.5 overflow-y-auto pr-0.5">

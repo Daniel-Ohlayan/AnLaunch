@@ -208,8 +208,8 @@ export default function ModsView({
     try {
       const data = await searchMods({
         query: q ?? query,
-        loader,
-        version: gameVersion as any,
+        loader: projectType === "modpack" ? undefined : loader,
+        version: projectType === "modpack" ? undefined : (gameVersion as any),
         index,
         projectType,
         limit: LIMIT,
@@ -295,9 +295,11 @@ export default function ModsView({
         </span>
       </div>
       <p className="mb-4 text-sm text-white/40">
-        {loader === "vanilla"
-          ? "На Vanilla моды не ставятся. Модпак ставится в отдельный профиль со своим загрузчиком."
-          : `Каталог для ${loaderLabel(loader)} · моды в этот профиль, модпак — в новый`}
+        {projectType === "modpack"
+          ? "Все версии и загрузчики. Установка создаёт отдельный профиль — текущий не нужен."
+          : loader === "vanilla"
+            ? "На Vanilla моды не ставятся. Модпак можно поставить сразу — он создаст свой профиль."
+            : `Моды только для ${loaderLabel(loader)} ${gameVersion}. Модпак — любой, в новый профиль.`}
       </p>
       {packStatus && (
         <div className="mb-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
@@ -548,7 +550,7 @@ function ModCard({
               "Установка…"
             ) : (
               <>
-                <DownloadIcon className="h-3.5 w-3.5" /> Установить
+                <DownloadIcon className="h-3.5 w-3.5" /> {installLabel || "Установить"}
               </>
             )}
           </button>
@@ -725,5 +727,8 @@ function CenteredError({ message, onRetry }: { message: string; onRetry: () => v
 }
 
 function CenteredMessage({ text }: { text: string }) {
+  return <div className="flex h-full items-center justify-center text-sm text-white/40">{text}</div>;
+}
+) {
   return <div className="flex h-full items-center justify-center text-sm text-white/40">{text}</div>;
 }

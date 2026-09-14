@@ -270,8 +270,8 @@ export default function App() {
 
     let file = version ? version.files.find((f) => f.primary) || version.files[0] : null;
     if (!file) {
-      let versions = await getProjectVersions(hit.project_id, {
-        loader: projectType === "modpack" && loader === "vanilla" ? undefined : loader,
+      const versions = await getProjectVersions(hit.project_id, {
+        loader: projectType === "modpack" ? undefined : loader,
         gameVersion: projectType === "modpack" ? undefined : gameVersion,
         projectType,
       });
@@ -281,10 +281,6 @@ export default function App() {
         projectType === "modpack" ? undefined : (gameVersion as any),
         projectType
       );
-      if (!file && projectType === "modpack") {
-        versions = await getProjectVersions(hit.project_id, { projectType });
-        file = findCompatibleFile(versions, undefined, undefined, projectType);
-      }
     }
     if (!file) {
       throw new Error(

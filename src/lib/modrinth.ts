@@ -169,7 +169,8 @@ export async function searchMods(params: {
 }): Promise<SearchResponse> {
   const { query = "", loader, version, index = "downloads", limit = 24, offset = 0, projectType = "mod" } = params;
   const facets: string[][] = [[`project_type:${projectType}`]];
-  if ((projectType === "mod" || projectType === "modpack") && loader && loader !== "vanilla") {
+  // Модпак ставится в свой профиль — не режем каталог по текущему загрузчику/версии.
+  if (projectType === "mod" && loader && loader !== "vanilla") {
     facets.push([`categories:${loader}`]);
   }
   if (projectType === "shader" && loader && loader !== "vanilla") {
@@ -203,11 +204,7 @@ export async function getProjectVersions(
   if (options?.gameVersion) {
     url.searchParams.set("game_versions", JSON.stringify([options.gameVersion]));
   }
-  if (
-    (options?.projectType === "mod" || options?.projectType === "modpack") &&
-    options.loader &&
-    options.loader !== "vanilla"
-  ) {
+  if (options?.projectType === "mod" && options.loader && options.loader !== "vanilla") {
     url.searchParams.set("loaders", JSON.stringify([options.loader]));
   }
 
