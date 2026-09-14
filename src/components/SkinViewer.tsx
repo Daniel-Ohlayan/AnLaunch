@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { loadImage, normalizeSkinDataUrl } from "../lib/skinPreview";
+import { detectSlim, loadImage, normalizeSkinDataUrl, skinUnit } from "../lib/skinPreview";
 
 type UV = { r: number[]; f: number[]; l: number[]; b: number[]; t: number[]; d: number[] };
+type FaceId = "f" | "b" | "r" | "l" | "t" | "d";
+
+const SHADE: Record<FaceId, number> = { f: 1, r: 0.78, l: 0.62, b: 0.45, t: 0.92, d: 0.38 };
 
 function drawFace(
   ctx: CanvasRenderingContext2D,
@@ -12,7 +15,8 @@ function drawFace(
   sh: number,
   p0: { x: number; y: number },
   p1: { x: number; y: number },
-  p3: { x: number; y: number }
+  p3: { x: number; y: number },
+  shade: number
 ) {
   if (sw <= 0 || sh <= 0) return;
   const dx = p1.x - p0.x;
@@ -31,6 +35,10 @@ function drawFace(
   ctx.setTransform(dx / sw, dy / sw, ex / sh, ey / sh, p0.x, p0.y);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  if (shade < 0.99) {
+    ctx.fillStyle = `rgba(0,0,0,${(1 - shade) * 0.55})`;
+    ctx.fillRect(0, 0, sw, sh);
+  }
   ctx.restore();
 }
 
@@ -55,7 +63,7 @@ function cuboid(
   sy: number,
   sz: number,
   uv: UV,
-  scale: number
+  overlay: boolean
 ) {
   const hx = sx / 2;
   const hy = sy / 2;
@@ -70,20 +78,39 @@ function cuboid(
     [hx, hy, hz],
     [-hx, hy, hz],
   ] as const;
-  const faces: { idx: number[]; uv: number[]; z: number }[] = [
-    { idx: [4, 5, 6, 7], uv: uv.f, z: oz + hz },
-    { idx: [1, 0, 3, 2], uv: uv.b, z: oz - hz },
-    { idx: [5, 1, 2, 6], uv: uv.r, z: ox + hx },
-    { idx: [0, 4, 7, 3], uv: uv.l, z: ox - hx },
-    { idx: [0, 1, 5, 4], uv: uv.t, z: oy - hy },
-    { idx: [7, 6, 2, 3], uv: uv.d, z: oy + hy },
+  const faces: { idx: number[]; uv: number[]; id: FaceId }[] = [
+    { idx: [4, 5, 6, 7], uv: uv.f, id: "f" },
+    { idx: [1, 0, 3, 2], uv: uv.b, id: "b" },
+    { idx: [5, 1, 2, 6], uv: uv.r, id: "r" },
+    { idx: [0, 4, 7, 3], uv: uv.l, id: "l" },
+    { idx: [0, 1, 5, 4], uv: uv.t, id: "t" },
+    { idx: [7, 6, 2, 3], uv: uv.d, id: "d" },
   ];
-  return { img, ox, oy, oz, corners, faces, scale };
+  return { img, ox, oy, oz, corners, faces, overlay };
+}
+
+function regionHasPixels(
+  data: Uint8ClampedArray,
+  tw: number,
+  u: number[],
+  unit: number
+): boolean {
+  const x0 = Math.max(0, Math.floor(u[0] * unit));
+  const y0 = Math.max(0, Math.floor(u[1] * unit));
+  const w = Math.max(1, Math.floor(u[2] * unit));
+  const h = Math.max(1, Math.floor(u[3] * unit));
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      if (data[(y * tw + x) * 4 + 3] > 18) return true;
+    }
+  }
+  return false;
 }
 
 function renderSkin(
   canvas: HTMLCanvasElement,
   img: HTMLImageElement,
+  pixels: Uint8ClampedArray | null,
   yawDeg: number,
   pitchDeg: number,
   slim: boolean,
@@ -98,15 +125,16 @@ function renderSkin(
   ctx.clearRect(0, 0, w, h);
   const yaw = (yawDeg * Math.PI) / 180;
   const pitch = (pitchDeg * Math.PI) / 180;
-  const px = 7.2;
+  const px = Math.min(w, h) / 46;
   const cx = w / 2;
-  const cy = h * 0.42;
+  const cy = h * 0.4;
   const armW = slim ? 3 : 4;
   const armX = 4 + armW / 2;
+  const unit = skinUnit(img);
 
   const parts = [
-    cuboid(img, 0, -10, 0, 8, 8, 8, { r: [0, 8, 8, 8], f: [8, 8, 8, 8], l: [16, 8, 8, 8], b: [24, 8, 8, 8], t: [8, 0, 8, 8], d: [16, 0, 8, 8] }, 1),
-    cuboid(img, 0, 0, 0, 8, 12, 4, { r: [16, 20, 4, 12], f: [20, 20, 8, 12], l: [28, 20, 4, 12], b: [32, 20, 8, 12], t: [20, 16, 8, 4], d: [28, 16, 8, 4] }, 1),
+    cuboid(img, 0, -10, 0, 8, 8, 8, { r: [0, 8, 8, 8], f: [8, 8, 8, 8], l: [16, 8, 8, 8], b: [24, 8, 8, 8], t: [8, 0, 8, 8], d: [16, 0, 8, 8] }, false),
+    cuboid(img, 0, 0, 0, 8, 12, 4, { r: [16, 20, 4, 12], f: [20, 20, 8, 12], l: [28, 20, 4, 12], b: [32, 20, 8, 12], t: [20, 16, 8, 4], d: [28, 16, 8, 4] }, false),
     cuboid(
       img,
       armX,
@@ -118,7 +146,7 @@ function renderSkin(
       slim
         ? { r: [40, 20, 4, 12], f: [44, 20, 3, 12], l: [47, 20, 4, 12], b: [51, 20, 3, 12], t: [44, 16, 3, 4], d: [47, 16, 3, 4] }
         : { r: [40, 20, 4, 12], f: [44, 20, 4, 12], l: [48, 20, 4, 12], b: [52, 20, 4, 12], t: [44, 16, 4, 4], d: [48, 16, 4, 4] },
-      1
+      false
     ),
     cuboid(
       img,
@@ -131,15 +159,15 @@ function renderSkin(
       slim
         ? { r: [32, 52, 4, 12], f: [36, 52, 3, 12], l: [39, 52, 4, 12], b: [43, 52, 3, 12], t: [36, 48, 3, 4], d: [39, 48, 3, 4] }
         : { r: [32, 52, 4, 12], f: [36, 52, 4, 12], l: [40, 52, 4, 12], b: [44, 52, 4, 12], t: [36, 48, 4, 4], d: [40, 48, 4, 4] },
-      1
+      false
     ),
-    cuboid(img, 2, 12, 0, 4, 12, 4, { r: [0, 20, 4, 12], f: [4, 20, 4, 12], l: [8, 20, 4, 12], b: [12, 20, 4, 12], t: [4, 16, 4, 4], d: [8, 16, 4, 4] }, 1),
-    cuboid(img, -2, 12, 0, 4, 12, 4, { r: [16, 52, 4, 12], f: [20, 52, 4, 12], l: [24, 52, 4, 12], b: [28, 52, 4, 12], t: [20, 48, 4, 4], d: [24, 48, 4, 4] }, 1),
+    cuboid(img, 2, 12, 0, 4, 12, 4, { r: [0, 20, 4, 12], f: [4, 20, 4, 12], l: [8, 20, 4, 12], b: [12, 20, 4, 12], t: [4, 16, 4, 4], d: [8, 16, 4, 4] }, false),
+    cuboid(img, -2, 12, 0, 4, 12, 4, { r: [16, 52, 4, 12], f: [20, 52, 4, 12], l: [24, 52, 4, 12], b: [28, 52, 4, 12], t: [20, 48, 4, 4], d: [24, 48, 4, 4] }, false),
   ];
   if (layers) {
     parts.push(
-      cuboid(img, 0, -10, 0, 9, 9, 9, { r: [32, 8, 8, 8], f: [40, 8, 8, 8], l: [48, 8, 8, 8], b: [56, 8, 8, 8], t: [40, 0, 8, 8], d: [48, 0, 8, 8] }, 1),
-      cuboid(img, 0, 0, 0, 8.5, 12.5, 4.5, { r: [16, 36, 4, 12], f: [20, 36, 8, 12], l: [28, 36, 4, 12], b: [32, 36, 8, 12], t: [20, 32, 8, 4], d: [28, 32, 8, 4] }, 1),
+      cuboid(img, 0, -10, 0, 8.5, 8.5, 8.5, { r: [32, 8, 8, 8], f: [40, 8, 8, 8], l: [48, 8, 8, 8], b: [56, 8, 8, 8], t: [40, 0, 8, 8], d: [48, 0, 8, 8] }, true),
+      cuboid(img, 0, 0, 0, 8.5, 12.5, 4.5, { r: [16, 36, 4, 12], f: [20, 36, 8, 12], l: [28, 36, 4, 12], b: [32, 36, 8, 12], t: [20, 32, 8, 4], d: [28, 32, 8, 4] }, true),
       cuboid(
         img,
         armX,
@@ -151,7 +179,7 @@ function renderSkin(
         slim
           ? { r: [40, 36, 4, 12], f: [44, 36, 3, 12], l: [47, 36, 4, 12], b: [51, 36, 3, 12], t: [44, 32, 3, 4], d: [47, 32, 3, 4] }
           : { r: [40, 36, 4, 12], f: [44, 36, 4, 12], l: [48, 36, 4, 12], b: [52, 36, 4, 12], t: [44, 32, 4, 4], d: [48, 32, 4, 4] },
-        1
+        true
       ),
       cuboid(
         img,
@@ -164,10 +192,10 @@ function renderSkin(
         slim
           ? { r: [48, 52, 4, 12], f: [52, 52, 3, 12], l: [55, 52, 4, 12], b: [59, 52, 3, 12], t: [52, 48, 3, 4], d: [55, 48, 3, 4] }
           : { r: [48, 52, 4, 12], f: [52, 52, 4, 12], l: [56, 52, 4, 12], b: [60, 52, 4, 12], t: [52, 48, 4, 4], d: [56, 48, 4, 4] },
-        1
+        true
       ),
-      cuboid(img, 2, 12, 0, 4.5, 12.5, 4.5, { r: [0, 36, 4, 12], f: [4, 36, 4, 12], l: [8, 36, 4, 12], b: [12, 36, 4, 12], t: [4, 32, 4, 4], d: [8, 32, 4, 4] }, 1),
-      cuboid(img, -2, 12, 0, 4.5, 12.5, 4.5, { r: [0, 52, 4, 12], f: [4, 52, 4, 12], l: [8, 52, 4, 12], b: [12, 52, 4, 12], t: [4, 48, 4, 4], d: [8, 48, 4, 4] }, 1)
+      cuboid(img, 2, 12, 0, 4.5, 12.5, 4.5, { r: [0, 36, 4, 12], f: [4, 36, 4, 12], l: [8, 36, 4, 12], b: [12, 36, 4, 12], t: [4, 32, 4, 4], d: [8, 32, 4, 4] }, true),
+      cuboid(img, -2, 12, 0, 4.5, 12.5, 4.5, { r: [0, 52, 4, 12], f: [4, 52, 4, 12], l: [8, 52, 4, 12], b: [12, 52, 4, 12], t: [4, 48, 4, 4], d: [8, 48, 4, 4] }, true)
     );
   }
   if (cape) {
@@ -175,13 +203,13 @@ function renderSkin(
       cuboid(
         cape,
         0,
-        1,
-        -3.1,
+        1.2,
+        -3.15,
         10,
         16,
         0.5,
         { r: [0, 1, 1, 16], f: [12, 1, 10, 16], l: [11, 1, 1, 16], b: [1, 1, 10, 16], t: [1, 0, 10, 1], d: [11, 0, 10, 1] },
-        1
+        false
       )
     );
   }
@@ -190,15 +218,21 @@ function renderSkin(
   for (const box of parts) {
     const pts = box.corners.map(([x, y, z]) => rotate(x + box.ox, y + box.oy, z + box.oz, yaw, pitch));
     const proj = pts.map((p) => ({ x: cx + p.x * px, y: cy + p.y * px, z: p.z }));
+    const faceUnit = box.img === img ? unit : Math.max(1, Math.round(box.img.width / 64));
     for (const face of box.faces) {
+      if (box.overlay && pixels && !regionHasPixels(pixels, img.width, face.uv, unit)) continue;
       const a = proj[face.idx[0]];
       const b = proj[face.idx[1]];
       const d = proj[face.idx[3]];
       const z = (a.z + b.z + proj[face.idx[2]].z + d.z) / 4;
       const u = face.uv;
+      const sx = u[0] * faceUnit;
+      const sy = u[1] * faceUnit;
+      const sw = u[2] * faceUnit;
+      const sh = u[3] * faceUnit;
       drawn.push({
         z,
-        draw: () => drawFace(ctx, box.img, u[0], u[1], u[2], u[3], a, b, d),
+        draw: () => drawFace(ctx, box.img, sx, sy, sw, sh, a, b, d, SHADE[face.id]),
       });
     }
   }
@@ -229,6 +263,20 @@ function UnwrapCanvas({ src }: { src: string }) {
   return <canvas ref={ref} className="max-h-[280px] w-full rounded-lg border border-white/10 bg-black/40" />;
 }
 
+function readPixels(img: HTMLImageElement): Uint8ClampedArray | null {
+  try {
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, img.width, img.height).data;
+  } catch {
+    return null;
+  }
+}
+
 export default function SkinViewer({
   skin,
   cape,
@@ -240,15 +288,16 @@ export default function SkinViewer({
 }) {
   const [mode, setMode] = useState<"3d" | "unwrap">("3d");
   const [layers, setLayers] = useState(true);
-  const [spin, setSpin] = useState(true);
+  const [spin, setSpin] = useState(false);
   const [norm, setNorm] = useState<string | undefined>(undefined);
   const yawRef = useRef(28);
-  const pitchRef = useRef(-12);
-  const autoSpin = useRef(true);
+  const pitchRef = useRef(-8);
+  const autoSpin = useRef(false);
   autoSpin.current = spin;
   const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const pixelsRef = useRef<Uint8ClampedArray | null>(null);
   const capeRef = useRef<HTMLImageElement | null>(null);
   const layersRef = useRef(layers);
   const slimRef = useRef(!!slim);
@@ -277,17 +326,21 @@ export default function SkinViewer({
 
   useEffect(() => {
     imgRef.current = null;
+    pixelsRef.current = null;
     if (!tex) return;
     let cancelled = false;
     loadImage(tex)
       .then((img) => {
-        if (!cancelled) imgRef.current = img;
+        if (cancelled) return;
+        imgRef.current = img;
+        pixelsRef.current = readPixels(img);
+        if (slim === undefined) slimRef.current = detectSlim(img);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [tex]);
+  }, [tex, slim]);
 
   useEffect(() => {
     capeRef.current = null;
@@ -305,16 +358,31 @@ export default function SkinViewer({
 
   useEffect(() => {
     if (mode !== "3d") return;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.round(280 * dpr);
+      canvas.height = Math.round(340 * dpr);
+    }
     let id = 0;
     let last = performance.now();
     const tick = (t: number) => {
       const dt = t - last;
       last = t;
       if (!drag.current && autoSpin.current) yawRef.current += dt * 0.018;
-      const canvas = canvasRef.current;
+      const cnv = canvasRef.current;
       const img = imgRef.current;
-      if (canvas && img) {
-        renderSkin(canvas, img, yawRef.current, pitchRef.current, slimRef.current, layersRef.current, capeRef.current);
+      if (cnv && img) {
+        renderSkin(
+          cnv,
+          img,
+          pixelsRef.current,
+          yawRef.current,
+          pitchRef.current,
+          slimRef.current,
+          layersRef.current,
+          capeRef.current
+        );
       }
       id = requestAnimationFrame(tick);
     };
@@ -352,7 +420,16 @@ export default function SkinViewer({
         >
           Слои
         </button>
-        <span className="ml-auto text-[10px] text-white/35">{slim ? "Alex" : "Steve"}</span>
+        <button
+          type="button"
+          onClick={() => setSpin((v) => !v)}
+          className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+            spin ? "bg-emerald-500/20 text-emerald-200" : "bg-white/[0.06] text-white/50"
+          }`}
+        >
+          Авто
+        </button>
+        <span className="ml-auto text-[10px] text-white/35">{slimRef.current || slim ? "Alex" : "Steve"}</span>
       </div>
 
       {!tex ? (
@@ -365,7 +442,7 @@ export default function SkinViewer({
         <UnwrapCanvas src={tex} />
       ) : (
         <div
-          className="relative cursor-grab touch-none rounded-lg bg-[radial-gradient(circle_at_50%_30%,#1a1d27,transparent_70%)] select-none active:cursor-grabbing"
+          className="relative cursor-grab touch-none select-none rounded-lg bg-[radial-gradient(circle_at_50%_28%,#222636,transparent_68%)] active:cursor-grabbing"
           onPointerDown={(e) => {
             e.preventDefault();
             (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
@@ -375,7 +452,7 @@ export default function SkinViewer({
           onPointerMove={(e) => {
             if (!drag.current) return;
             yawRef.current = drag.current.yaw + (e.clientX - drag.current.x) * 0.55;
-            pitchRef.current = Math.max(-40, Math.min(25, drag.current.pitch + (e.clientY - drag.current.y) * 0.35));
+            pitchRef.current = Math.max(-40, Math.min(28, drag.current.pitch + (e.clientY - drag.current.y) * 0.35));
           }}
           onPointerUp={() => {
             drag.current = null;
@@ -384,11 +461,10 @@ export default function SkinViewer({
             drag.current = null;
           }}
         >
-          <canvas ref={canvasRef} width={280} height={340} className="mx-auto block h-[260px] w-auto" />
+          <canvas ref={canvasRef} className="mx-auto block h-[260px] w-auto" />
           <div className="pointer-events-none absolute bottom-2 left-0 right-0 text-center text-[10px] text-white/35">
             Перетащите, чтобы повернуть
           </div>
-          {cape ? <span className="sr-only">Плащ</span> : null}
         </div>
       )}
     </div>

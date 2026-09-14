@@ -133,7 +133,14 @@ export default function SettingsView({
   useEffect(() => {
     if (!window.electronAPI) return;
     window.electronAPI.getAppVersion().then(setAppVersion);
-    window.electronAPI.getAutoStart().then((r) => setAutoStart(!!r.enabled));
+    const savedAuto = localStorage.getItem("anlaunch_auto_start");
+    if (savedAuto === "true") setAutoStart(true);
+    window.electronAPI.getAutoStart().then((r) => {
+      if (r.enabled) {
+        setAutoStart(true);
+        localStorage.setItem("anlaunch_auto_start", "true");
+      }
+    });
     window.electronAPI.getSystemMemory().then((m) =>
       setSysMem({ totalGB: m.totalGB, freeGB: m.freeGB, cpus: m.cpus })
     );
@@ -642,11 +649,14 @@ export default function SettingsView({
                   checked={autoStart}
                   onChange={async (v) => {
                     if (!window.electronAPI) return showToast("Только в десктоп-версии", "err");
+                    setAutoStart(v);
+                    localStorage.setItem("anlaunch_auto_start", String(v));
                     const res = await window.electronAPI.setAutoStart(v);
                     if (res.success) {
-                      setAutoStart(!!res.enabled);
-                      showToast(res.enabled ? "Автозапуск включён" : "Автозапуск выключен");
+                      showToast(v ? "Автозапуск включён" : "Автозапуск выключен");
                     } else {
+                      setAutoStart(!v);
+                      localStorage.setItem("anlaunch_auto_start", String(!v));
                       showToast(res.error || "Не удалось изменить автозапуск", "err");
                     }
                   }}

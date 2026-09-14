@@ -252,8 +252,16 @@ ipcMain.handle("get-system-memory", () => {
 
 ipcMain.handle("set-auto-start", (_event, enabled) => {
   try {
-    app.setLoginItemSettings({ openAtLogin: !!enabled, name: "AnLaunch" });
-    return { success: true, enabled: app.getLoginItemSettings().openAtLogin };
+    const on = !!enabled;
+    app.setLoginItemSettings({
+      openAtLogin: on,
+      enabled: on,
+      name: "AnLaunch",
+      path: process.execPath,
+      args: [],
+    });
+    // На Windows getLoginItemSettings часто врёт для NSIS — UI берёт запрошенное значение.
+    return { success: true, enabled: on };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -261,7 +269,8 @@ ipcMain.handle("set-auto-start", (_event, enabled) => {
 
 ipcMain.handle("get-auto-start", () => {
   try {
-    return { success: true, enabled: !!app.getLoginItemSettings().openAtLogin };
+    const s = app.getLoginItemSettings();
+    return { success: true, enabled: !!(s.openAtLogin || s.executableWillLaunchAtLogin) };
   } catch {
     return { success: true, enabled: false };
   }
