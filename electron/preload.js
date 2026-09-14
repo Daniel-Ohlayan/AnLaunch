@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Моды
   downloadModToProfile: (data) => ipcRenderer.invoke("download-mod-to-profile", data),
   removeModFromProfile: (data) => ipcRenderer.invoke("remove-mod-from-profile", data),
+  installModpack: (data) => ipcRenderer.invoke("install-modpack", data),
+  onInstallProgress: (callback) => {
+    const handler = (_event, msg) => callback(msg);
+    ipcRenderer.on("install-progress", handler);
+    return () => ipcRenderer.removeListener("install-progress", handler);
+  },
 
   // Настройки главного экрана
   saveAccountTexture: (data) => ipcRenderer.invoke("save-account-texture", data),

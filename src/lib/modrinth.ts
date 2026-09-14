@@ -32,9 +32,9 @@ export function loaderLabel(loader: ModLoader): string {
   return loader.charAt(0).toUpperCase() + loader.slice(1);
 }
 
-/** Как на Modrinth: моды/модпаки только с загрузчиком, Vanilla — ресурспаки и датапаки. */
+/** Как на Modrinth: моды только с загрузчиком. Модпак ставится в отдельный профиль. */
 export function contentTypesForLoader(loader: ModLoader): ProjectType[] {
-  if (loader === "vanilla") return ["resourcepack", "datapack"];
+  if (loader === "vanilla") return ["modpack", "resourcepack", "datapack"];
   return ["mod", "resourcepack", "modpack", "datapack", "shader"];
 }
 
@@ -177,7 +177,7 @@ export async function searchMods(params: {
       loader === "forge" || loader === "neoforge" ? ["oculus"] : ["iris"];
     facets.push(shaderLoaders.map((id) => `categories:${id}`));
   }
-  if (version) facets.push([`versions:${version}`]);
+  if (version && projectType !== "modpack") facets.push([`versions:${version}`]);
 
   const url = new URL(`${BASE}/search`);
   url.searchParams.set("query", query);

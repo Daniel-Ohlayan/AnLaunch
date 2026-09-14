@@ -697,6 +697,25 @@ ipcMain.handle("download-mod-to-profile", async (_event, { profile, fileName, ur
   }
 });
 
+ipcMain.handle("install-modpack", async (_event, { url, title }) => {
+  try {
+    const { installModpack } = require("./modpack");
+    const log = (msg) => {
+      appendLog("info", msg);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("install-progress", msg);
+      }
+    };
+    const result = await installModpack({ url, title }, app.getPath("userData"), downloadModFile, log);
+    appendLog("success", `Модпак установлен в профиль «${result.profile}»`);
+    return result;
+  } catch (err) {
+    const text = friendlyError(err);
+    appendLog("error", text);
+    return { success: false, error: text };
+  }
+});
+
 // Удаление файла из папки профиля
 ipcMain.handle("remove-mod-from-profile", async (_event, { profile, fileName, subfolder }) => {
   const { ensureProfile } = require("./profiles");

@@ -262,7 +262,7 @@ export default function App() {
   }, [launching.progress]);
 
   async function installMod(hit: ModHit, projectType: ProjectType = "mod", version?: ProjectVersion) {
-    if ((projectType === "mod" || projectType === "modpack") && loader === "vanilla") {
+    if (projectType === "mod" && loader === "vanilla") {
       throw new Error(
         "На Vanilla моды не устанавливаются. Создайте профиль с Fabric или Quilt."
       );
@@ -270,18 +270,57 @@ export default function App() {
 
     let file = version ? version.files.find((f) => f.primary) || version.files[0] : null;
     if (!file) {
-      const versions = await getProjectVersions(hit.project_id, {
-        loader,
-        gameVersion,
+      let versions = await getProjectVersions(hit.project_id, {
+        loader: projectType === "modpack" && loader === "vanilla" ? undefined : loader,
+        gameVersion: projectType === "modpack" ? undefined : gameVersion,
         projectType,
       });
-      file = findCompatibleFile(versions, loader, gameVersion as any, projectType);
+      file = findCompatibleFile(
+        versions,
+        projectType === "modpack" ? undefined : loader,
+        projectType === "modpack" ? undefined : (gameVersion as any),
+        projectType
+      );
+      if (!file && projectType === "modpack") {
+        versions = await getProjectVersions(hit.project_id, { projectType });
+        file = findCompatibleFile(versions, undefined, undefined, projectType);
+      }
     }
     if (!file) {
       throw new Error(
-        `Для Minecraft ${gameVersion} (${loader}) нет совместимой версии «${hit.title}». ` +
-        `Старый файл установлен не будет.`
+        projectType === "modpack"
+          ? `Не найден файл модпака «${hit.title}».`
+          : `Для Minecraft ${gameVersion} (${loader}) нет совместимой версии «${hit.title}». ` +
+            `Старый файл установлен не будет.`
       );
+    }
+
+    if (projectType === "modpack") {
+      if (!window.electronAPI?.installModpack) {
+        throw new Error("Обновите лаунчер — эта сборка не умеет ставить модпаки.");
+      }
+      const pack = await window.electronAPI.installModpack({ url: file.url, title: hit.title });
+      if (!pack.success || !pack.profile || !pack.minecraft || !pack.loader) {
+        throw new Error(pack.error || "Не удалось установить модпак");
+      }
+      const packLoader = pack.loader as ModLoader;
+      localStorage.setItem(
+        `anlaunch_profile_${pack.profile}`,
+        JSON.stringify({
+          version: pack.minecraft,
+          loader: packLoader,
+          description: hit.description || "",
+          avatarUrl: hit.icon_url,
+          accentColor: homeSettings.accentColor,
+          modpackId: hit.project_id,
+        })
+      );
+      setActiveProfile(pack.profile);
+      localStorage.setItem("anlaunch_active_profile", pack.profile);
+      setGameVersion(pack.minecraft);
+      setLoader(packLoader);
+      await refreshProfiles();
+      return;
     }
 
     const prev = installedMods.find((m) => m.id === hit.project_id && m.profile === activeProfile);

@@ -69,6 +69,7 @@ export default function ModsView({
     { fileName: string; size: number; sha1?: string | null; subfolder: string; projectType: string }[]
   >([]);
   const [fileMeta, setFileMeta] = useState<Record<string, FileProjectMeta>>({});
+  const [packStatus, setPackStatus] = useState<string | null>(null);
   const LIMIT = 20;
 
   const accent = getAccent(homeSettings?.accentColor);
@@ -139,6 +140,11 @@ export default function ModsView({
     refreshDisk();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProfile, tab]);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onInstallProgress) return;
+    return window.electronAPI.onInstallProgress((msg) => setPackStatus(msg));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,9 +255,17 @@ export default function ModsView({
   async function handleInstall(hit: ModHit, version?: ProjectVersion) {
     setInstalling((s) => new Set(s).add(hit.project_id));
     setError(null);
+    setPackStatus(projectType === "modpack" ? "Установка модпака в новый профиль…" : null);
     try {
       await onInstall(hit, projectType, version);
+      if (projectType === "modpack") {
+        setPackStatus("Модпак установлен — открыт отдельный профиль");
+        setTimeout(() => setPackStatus(null), 4000);
+      } else {
+        setPackStatus(null);
+      }
     } catch (e) {
+      setPackStatus(null);
       setError(e instanceof Error ? e.message : "Ошибка установки");
     } finally {
       setInstalling((s) => {
@@ -282,9 +296,14 @@ export default function ModsView({
       </div>
       <p className="mb-4 text-sm text-white/40">
         {loader === "vanilla"
-          ? "На Vanilla моды не ставятся — только ресурспаки и датапаки, как на Modrinth"
-          : `Каталог только для ${loaderLabel(loader)} · ставится в папку профиля`}
+          ? "На Vanilla моды не ставятся. Модпак ставится в отдельный профиль со своим загрузчиком."
+          : `Каталог для ${loaderLabel(loader)} · моды в этот профиль, модпак — в новый`}
       </p>
+      {packStatus && (
+        <div className="mb-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+          {packStatus}
+        </div>
+      )}
 
       {/* Project type tabs */}
       <div className="mb-4 flex gap-1.5">
@@ -373,6 +392,7 @@ export default function ModsView({
                     onInstall={() => handleInstall(hit)}
                     onOpen={() => setDetail(hit)}
                     accentColor={homeSettings?.accentColor}
+                    installLabel={projectType === "modpack" ? "В профиль" : undefined}
                   />
                 ))}
               </div>
@@ -479,6 +499,7 @@ function ModCard({
   onInstall,
   onOpen,
   accentColor,
+  installLabel,
 }: {
   hit: ModHit;
   installed: boolean;
@@ -486,6 +507,7 @@ function ModCard({
   onInstall: () => void;
   onOpen: () => void;
   accentColor?: string;
+  installLabel?: string;
 }) {
   const accent = getAccent(accentColor);
   return (

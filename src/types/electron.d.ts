@@ -147,6 +147,18 @@ export interface ElectronAPI {
     success: boolean;
     error?: string;
   }>;
+  installModpack: (data: { url: string; title?: string }) => Promise<{
+    success: boolean;
+    profile?: string;
+    minecraft?: string;
+    loader?: string;
+    loaderVersion?: string;
+    files?: number;
+    failed?: number;
+    title?: string;
+    error?: string;
+  }>;
+  onInstallProgress: (callback: (msg: string) => void) => () => void;
 
   // Microsoft
   loginMicrosoft: () => Promise<

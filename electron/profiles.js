@@ -58,6 +58,17 @@ function ensureProfile(userDataPath, profileName) {
   return { name: safeName, dir };
 }
 
+function uniqueProfileName(userDataPath, desired) {
+  const base = sanitizeProfileName(desired);
+  const existing = new Set(listProfiles(userDataPath).map((p) => p.name.toLowerCase()));
+  if (!existing.has(base.toLowerCase())) return base;
+  for (let n = 2; n < 200; n++) {
+    const name = sanitizeProfileName(`${base} ${n}`);
+    if (!existing.has(name.toLowerCase())) return name;
+  }
+  return sanitizeProfileName(`${base}-${Date.now()}`);
+}
+
 function findProfile(userDataPath, profileName) {
   const safeName = sanitizeProfileName(profileName || "");
   if (!safeName) return null;
@@ -197,6 +208,7 @@ module.exports = {
   getSharedDir,
   ensureProfile,
   findProfile,
+  uniqueProfileName,
   resolveLaunchProfile,
   sanitizeProfileName,
   listProfiles,
