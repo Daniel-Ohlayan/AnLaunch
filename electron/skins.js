@@ -157,8 +157,10 @@ function texturePayload() {
   const textures = {};
   const origin = `http://127.0.0.1:${serverPort}`;
   if (current.skinPath && fs.existsSync(current.skinPath)) {
-    textures.SKIN = { url: `${origin}/textures/skin.png` };
-    if (current.slim) textures.SKIN.metadata = { model: "slim" };
+    textures.SKIN = {
+      url: `${origin}/textures/skin.png`,
+      metadata: { model: current.slim ? "slim" : "classic" },
+    };
   }
   if (current.capePath && fs.existsSync(current.capePath)) {
     textures.CAPE = { url: `${origin}/textures/cape.png` };
