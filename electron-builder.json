@@ -1,0 +1,75 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.anlaunch.launcher",
+  "productName": "AnLaunch",
+  "directories": {
+    "output": "release"
+  },
+    "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "public/icon.png",
+    "build/icon.ico",
+    "package.json",
+    "node_modules/**/*"
+  ],
+  "asarUnpack": [
+    "electron/icon.ico",
+    "electron/icon.png",
+    "build/icon.ico"
+  ],
+  "extraResources": [
+    { "from": "build/icon.ico", "to": "icon.ico" },
+    { "from": "public/icon.png", "to": "icon.png" }
+  ],
+  "npmRebuild": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.ico",
+    "signAndEditExecutable": true,
+    "artifactName": "AnLaunch-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "AnLaunch",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico"
+  },
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "icon": "public/icon.png",
+    "artifactName": "AnLaunch-${version}-${arch}.${ext}"
+  },
+  "linux": {
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/icon.png",
+    "artifactName": "AnLaunch-${version}.${ext}",
+    "category": "Game"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "Daniel-Ohlayan",
+    "repo": "AnLaunch"
+  }
+}
