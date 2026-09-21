@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.anlaunch.launcher",
-  "productName": "AnLaunch",
+  "productName": "AnLauncher",
   "directories": {
     "output": "release"
   },
@@ -12,11 +12,6 @@
     "build/icon.ico",
     "package.json",
     "node_modules/**/*"
-  ],
-  "asarUnpack": [
-    "electron/icon.ico",
-    "electron/icon.png",
-    "build/icon.ico"
   ],
   "extraResources": [
     { "from": "build/icon.ico", "to": "icon.ico" },
@@ -32,7 +27,7 @@
     ],
     "icon": "build/icon.ico",
     "signAndEditExecutable": true,
-    "artifactName": "AnLaunch-Setup-${version}.${ext}"
+    "artifactName": "AnLauncher-Setup-${version}.${ext}"
   },
   "nsis": {
     "oneClick": false,
@@ -41,7 +36,7 @@
     "deleteAppDataOnUninstall": false,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "AnLaunch",
+    "shortcutName": "AnLauncher",
     "installerIcon": "build/icon.ico",
     "uninstallerIcon": "build/icon.ico",
     "installerHeaderIcon": "build/icon.ico"
@@ -54,7 +49,7 @@
       }
     ],
     "icon": "public/icon.png",
-    "artifactName": "AnLaunch-${version}-${arch}.${ext}"
+    "artifactName": "AnLauncher-${version}-${arch}.${ext}"
   },
   "linux": {
     "target": [
@@ -64,7 +59,7 @@
       }
     ],
     "icon": "public/icon.png",
-    "artifactName": "AnLaunch-${version}.${ext}",
+    "artifactName": "AnLauncher-${version}.${ext}",
     "category": "Game"
   },
   "publish": {
