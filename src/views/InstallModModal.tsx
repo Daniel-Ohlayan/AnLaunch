@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, formatBytes } from "../lib/api";
 import { cn } from "../lib/cn";
 import type { InstallEvent, InstallItem, ModHit, ModVersion, ResolvePlan } from "../lib/types";
 import type { Ctx } from "../App";
-import { Badge, Button, LogView, Modal, Progress, Spinner } from "../components/ui";
+import { Badge, Button, Modal, Progress, Spinner } from "../components/ui";
 
 type Step = "versions" | "plan" | "install" | "done";
 
@@ -30,20 +30,16 @@ export function InstallModModal({
   // план
   const [plan, setPlan] = useState<ResolvePlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
-
-  // лог установки: что доставили (мод, зависимости, библиотеки)
-  const [logs, setLogs] = useState<string[]>([]);
+  const [optionalSlugs, setOptionalSlugs] = useState<Set<string>>(new Set());
 
   // установка
   const [statuses, setStatuses] = useState<Map<string, ItemStatus>>(new Map());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
-  const [doneCount, setDoneCount] = useState<{ installed: number; failed: number; skipped: number } | null>(null);
-  const [notes, setNotes] = useState<Map<string, string>>(new Map());
+  const [doneCount, setDoneCount] = useState<{ installed: number; failed: number } | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
   const gameVersion = profile?.gameVersion ?? "";
   const loader = profile?.loader ?? "vanilla";
-  const vanilla = loader === "vanilla"; // в Vanilla моды не ставятся
 
   // 1) список версий мода
   useEffect(() => {
@@ -70,33 +66,51 @@ export function InstallModModal({
     };
   }, [hit.projectId, gameVersion, loader]);
 
-  // 2) разрешаем план установки: мод + обязательные зависимости и библиотеки
-  const loadPlan = useCallback(async () => {
-    if (!versionId) return;
-    setPlanLoading(true);
-    setError(null);
-    try {
-      const p = await api.resolveInstall({
-        projectId: hit.projectId,
-        versionId,
-        gameVersion: gameVersion || undefined,
-        loader: vanilla ? undefined : loader,
-        profileId: profile?.id,
-        projectSlug: hit.slug,
-        projectTitle: hit.title,
-      });
-      setPlan(p);
-      if (p.conflicts.length) setError(p.conflicts.join("; "));
-    } catch (e) {
-      setError(String((e as Error).message || e));
-    } finally {
-      setPlanLoading(false);
-    }
-  }, [hit.projectId, hit.slug, hit.title, versionId, gameVersion, loader, vanilla, profile?.id]);
+  const selectedVersion = useMemo(() => versions.find((v) => v.id === versionId) ?? null, [versions, versionId]);
+
+  const optionalDeps = useMemo(
+    () => (selectedVersion ? selectedVersion.dependencies.filter((d) => d.dependencyType === "optional") : []),
+    [selectedVersion],
+  );
+
+  // 2) разрешаем план установки (включая required-зависимости)
+  const loadPlan = useCallback(
+    async (optSlugs: string[]) => {
+      if (!versionId) return;
+      setPlanLoading(true);
+      setError(null);
+      try {
+        const p = await api.resolveInstall({
+          projectId: hit.projectId,
+          versionId,
+          gameVersion: gameVersion || undefined,
+          loader: loader === "vanilla" ? undefined : loader,
+          optionalSlugs: optSlugs,
+          projectSlug: hit.slug,
+          projectTitle: hit.title,
+        });
+        setPlan(p);
+        if (p.conflicts.length) setError(p.conflicts.join("; "));
+      } catch (e) {
+        setError(String((e as Error).message || e));
+      } finally {
+        setPlanLoading(false);
+      }
+    },
+    [hit.projectId, hit.slug, hit.title, versionId, gameVersion, loader],
+  );
 
   const toPlan = () => {
-    loadPlan();
+    loadPlan([...optionalSlugs]);
     setStep("plan");
+  };
+
+  const toggleOptional = (slug: string) => {
+    const next = new Set(optionalSlugs);
+    if (next.has(slug)) next.delete(slug);
+    else next.add(slug);
+    setOptionalSlugs(next);
+    if (step === "plan") loadPlan([...next]);
   };
 
   // 3) установка
@@ -105,9 +119,7 @@ export function InstallModModal({
     setStep("install");
     setStatuses(new Map((plan?.items ?? []).map((i) => [i.key, "pending"])));
     setErrors(new Map());
-    setNotes(new Map());
     setDoneCount(null);
-    setLogs([]);
 
     unsubRef.current?.();
     unsubRef.current = api.onInstall((e: InstallEvent) => {
@@ -119,12 +131,8 @@ export function InstallModModal({
         });
         const err = e.error;
         if (err) setErrors((prev) => new Map(prev).set(e.key, err));
-        const note = e.note;
-        if (note) setNotes((prev) => new Map(prev).set(e.key, note));
-      } else if (e.type === "log") {
-        setLogs((prev) => (prev.length > 800 ? [...prev.slice(-600), e.line] : [...prev, e.line]));
       } else if (e.type === "done") {
-        setDoneCount({ installed: e.installed, failed: e.failed, skipped: e.skipped ?? 0 });
+        setDoneCount({ installed: e.installed, failed: e.failed });
       }
     });
 
@@ -134,7 +142,8 @@ export function InstallModModal({
         projectId: hit.projectId,
         versionId: versionId ?? undefined,
         gameVersion: gameVersion || undefined,
-        loader: vanilla ? undefined : loader,
+        loader: loader === "vanilla" ? undefined : loader,
+        optionalSlugs: [...optionalSlugs],
         projectSlug: hit.slug,
         projectTitle: hit.title,
       });
@@ -153,11 +162,10 @@ export function InstallModModal({
   const items = plan?.items ?? [];
   const mainItem = items.find((i) => i.kind === "mod");
   const requiredItems = items.filter((i) => i.kind === "dependency");
-  const alreadyCount = items.filter((i) => i.alreadyInstalled).length;
-  const toInstall = items.filter((i) => !i.alreadyInstalled && !i.skipped && i.file);
+  const optionalInPlan = items.filter((i) => i.kind === "optional");
   const doneTotal = doneCount ?? null;
-  const finishedCount = [...statuses.values()].filter((s) => s === "done" || s === "error").length;
-  const totalForProgress = toInstall.length;
+  const finishedCount = [...statuses.values()].filter((s) => s !== "pending" && s !== "downloading").length;
+  const totalForProgress = items.length;
 
   return (
     <Modal
@@ -183,12 +191,6 @@ export function InstallModModal({
               </span>
             )}
           </div>
-          {vanilla && (
-            <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
-              ⚠ Профиль «{profile?.name}» — Vanilla: загрузчика модов нет, поэтому моды в него не ставятся. Выберите профиль с
-              Forge или NeoForge.
-            </div>
-          )}
           {versionsLoading ? (
             <div className="flex items-center gap-2 py-8 text-muted">
               <Spinner /> Получаем версии…
@@ -222,7 +224,7 @@ export function InstallModModal({
                 <Button variant="ghost" onClick={onClose}>
                   Отмена
                 </Button>
-                <Button onClick={toPlan} disabled={!versionId || vanilla} title={vanilla ? "Vanilla-профиль: моды не устанавливаются" : undefined}>
+                <Button onClick={toPlan} disabled={!versionId}>
                   Проверить зависимости
                 </Button>
               </div>
@@ -241,39 +243,57 @@ export function InstallModModal({
             </div>
           ) : (
             <>
-              <PlanItem
-                item={mainItem!}
-                badge={
-                  mainItem?.alreadyInstalled ? (
-                    <Badge tone="ok">уже в профиле{mainItem.installedVersionNumber ? ` · v${mainItem.installedVersionNumber}` : ""}</Badge>
-                  ) : (
-                    <Badge tone="accent">основной мод</Badge>
-                  )
-                }
-              />
+              <PlanItem item={mainItem!} badge={<Badge tone="accent">основной мод</Badge>} />
 
               {requiredItems.length > 0 && (
                 <div>
                   <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted">
-                    Обязательные зависимости и библиотеки — ставятся сразу, как на сайте
+                    Обязательные зависимости — установятся автоматически
                     <Badge tone="ok">{requiredItems.length}</Badge>
                   </div>
                   <div className="space-y-1.5">
                     {requiredItems.map((i) => (
-                      <PlanItem
-                        key={i.key}
-                        item={i}
-                        reason={i.reason}
-                        badge={i.alreadyInstalled ? <Badge tone="ok">уже в профиле{i.installedVersionNumber ? ` · v${i.installedVersionNumber}` : ""}</Badge> : undefined}
-                      />
+                      <PlanItem key={i.key} item={i} reason={i.reason} />
                     ))}
                   </div>
                 </div>
               )}
 
-              <div className="text-[11px] text-muted/70">
-                Опциональные зависимости не устанавливаются — их можно добавить вручную с сайта Modrinth.
-              </div>
+              {optionalInPlan.length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">
+                    Выбранные опциональные
+                  </div>
+                  <div className="space-y-1.5">
+                    {optionalInPlan.map((i) => (
+                      <PlanItem key={i.key} item={i} reason={i.reason} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {optionalDeps.length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Опциональные зависимости</div>
+                  <div className="space-y-1">
+                    {optionalDeps.map((d) => (
+                      <label
+                        key={d.projectSlug}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:bg-panel-3"
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-[#22d3ee]"
+                          checked={optionalSlugs.has(d.projectSlug)}
+                          onChange={() => toggleOptional(d.projectSlug)}
+                        />
+                        <span>{d.projectSlug}</span>
+                        <span className="ml-auto text-[11px] text-muted">необязательно</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {plan.errors.length > 0 && (
                 <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
@@ -295,16 +315,8 @@ export function InstallModModal({
               <Button variant="ghost" onClick={onClose}>
                 Отмена
               </Button>
-              <Button
-                onClick={startInstall}
-                disabled={planLoading || !!error || !toInstall.length || !profile}
-                title={alreadyCount && alreadyCount === items.length ? "Всё из списка уже стоит в профиле" : undefined}
-              >
-                {toInstall.length
-                  ? `Установить (${toInstall.length} шт.)`
-                  : alreadyCount === items.length
-                    ? "Всё уже установлено"
-                    : "Нет файлов для загрузки"}
+              <Button onClick={startInstall} disabled={planLoading || !!error || !plan?.items.length || !profile}>
+                Установить ({items.length} шт.)
               </Button>
             </div>
           </div>
@@ -317,18 +329,12 @@ export function InstallModModal({
           <Progress value={totalForProgress ? (finishedCount / totalForProgress) * 100 : null} label={`Готово ${finishedCount} из ${totalForProgress}`} />
           <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
             {items.map((i) => (
-              <InstallRow key={i.key} item={i} status={statuses.get(i.key) ?? "pending"} error={errors.get(i.key)} note={notes.get(i.key)} />
+              <InstallRow key={i.key} item={i} status={statuses.get(i.key) ?? "pending"} error={errors.get(i.key)} />
             ))}
           </div>
           {doneTotal === null && (
             <div className="flex items-center gap-2 text-sm text-muted">
-              <Spinner /> Ставим мод вместе с обязательными зависимостями и библиотеками…
-            </div>
-          )}
-          {logs.length > 0 && (
-            <div>
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Лог установки</div>
-              <LogView lines={logs} className="h-36" />
+              <Spinner /> Устанавливаем вместе с обязательными зависимостями…
             </div>
           )}
         </div>
@@ -338,21 +344,15 @@ export function InstallModModal({
       {step === "done" && (
         <div className="space-y-4">
           {doneCount ? (
-            doneCount.installed === 0 && doneCount.skipped > 0 ? (
-              <div className="rounded-xl border border-ok/30 bg-ok/10 px-4 py-3 text-sm text-ok">
-                ✅ Всё уже стоит в профиле — заново ничего не качали ({doneCount.skipped})
-              </div>
-            ) : doneCount.failed === 0 ? (
+            doneCount.failed === 0 ? (
               <div className="rounded-xl border border-ok/30 bg-ok/10 px-4 py-3 text-sm text-ok">
                 ✅ Установлено {doneCount.installed}{" "}
                 {doneCount.installed === 1 ? "мод" : doneCount.installed < 5 && doneCount.installed > 1 ? "мода" : "модов"}
-                {doneCount.installed > 1 ? " (включая обязательные зависимости и библиотеки)" : ""}
-                {doneCount.skipped > 0 ? ` · уже было в профиле: ${doneCount.skipped}` : ""}
+                {doneCount.installed > 1 ? " (включая зависимости)" : ""}
               </div>
             ) : (
               <div className="rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-warn">
                 ⚠ Установлено {doneCount.installed}, ошибок: {doneCount.failed}
-                {doneCount.skipped > 0 ? ` · уже было в профиле: ${doneCount.skipped}` : ""}
               </div>
             )
           ) : (
@@ -363,21 +363,9 @@ export function InstallModModal({
           {error && <ErrorBox text={error} />}
           <div className="max-h-48 space-y-1.5 overflow-y-auto">
             {items.map((i) => (
-              <InstallRow
-                key={i.key}
-                item={i}
-                status={statuses.get(i.key) ?? (doneCount && doneCount.failed === 0 ? "done" : "skipped")}
-                error={errors.get(i.key)}
-                note={notes.get(i.key)}
-              />
+              <InstallRow key={i.key} item={i} status={statuses.get(i.key) ?? (doneCount && doneCount.failed === 0 ? "done" : "skipped")} error={errors.get(i.key)} />
             ))}
           </div>
-          {logs.length > 0 && (
-            <div>
-              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">Лог установки</div>
-              <LogView lines={logs} className="h-36" />
-            </div>
-          )}
           <div className="flex justify-end">
             <Button onClick={onClose}>Готово</Button>
           </div>
@@ -402,8 +390,7 @@ function PlanItem({ item, reason, badge }: { item: InstallItem | undefined; reas
   );
 }
 
-function InstallRow({ item, status, error, note }: { item: InstallItem; status: ItemStatus; error?: string; note?: string }) {
-  const skippedLabel = note ?? item.note ?? "пропущено";
+function InstallRow({ item, status, error }: { item: InstallItem; status: ItemStatus; error?: string }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm">
       {status === "downloading" ? (
@@ -422,7 +409,7 @@ function InstallRow({ item, status, error, note }: { item: InstallItem; status: 
         {status === "downloading" && <span className="text-accent">загрузка…</span>}
         {status === "done" && <span className="text-ok">установлено</span>}
         {status === "error" && <span className="text-danger" title={error}>ошибка</span>}
-        {status === "skipped" && <span className="text-muted">{skippedLabel}</span>}
+        {status === "skipped" && <span className="text-muted">пропущено</span>}
         {status === "pending" && <span className="text-muted/50">ожидание</span>}
       </span>
     </div>

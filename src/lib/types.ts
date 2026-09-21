@@ -97,7 +97,7 @@ export interface InstallFile {
 
 export interface InstallItem {
   key: string;
-  kind: "mod" | "dependency";
+  kind: "mod" | "dependency" | "optional";
   slug: string;
   title: string;
   projectId: string;
@@ -128,6 +128,8 @@ export interface ResolveParams {
   loader?: Loader;
   /** Профиль, в который ставим: по нему отсекаем уже установленное. */
   profileId?: string;
+  /** Больше не используется: опциональные зависимости не устанавливаются. */
+  optionalSlugs?: string[];
   projectSlug?: string;
   projectTitle?: string;
 }
@@ -183,6 +185,8 @@ export interface LauncherApi {
     versionId?: string;
     gameVersion?: string;
     loader?: Loader;
+    /** Больше не используется: опциональные зависимости не устанавливаются. */
+    optionalSlugs?: string[];
     projectSlug?: string;
     projectTitle?: string;
   }): Promise<{ installed: number; failed: number; skipped: number; modsDir: string }>;

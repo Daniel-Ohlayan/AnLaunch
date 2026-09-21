@@ -1293,9 +1293,17 @@ function registerIpc() {
       throw new Error('В Vanilla-профиль моды не устанавливаются. Создайте профиль с Forge или NeoForge.');
     }
     const emit = (ev) => send('evt:install', ev);
-    // лог установки: в окно лаунчера и в консоль (с префиксом лаунчера)
+    // Лог установки: консоль + файл instances/<имя>/logs/anlauncher.log (и событие для UI).
+    const installLogDir = path.join(profileDir(cfg, profile), 'logs');
+    const installLogFile = path.join(installLogDir, 'anlauncher.log');
     const log = (line) => {
       console.log(line);
+      try {
+        fs.mkdirSync(installLogDir, { recursive: true });
+        fs.appendFileSync(installLogFile, `${new Date().toISOString()} ${line}\n`);
+      } catch {
+        /* лог не критичен для установки */
+      }
       emit({ type: 'log', line });
     };
 
