@@ -58,6 +58,14 @@ export function ModsView({ ctx }: { ctx: Ctx }) {
   }, [doSearch, query]);
 
   const installedSet = new Set((ctx.activeProfile?.installed ?? []).map((m) => m.slug));
+  // В Vanilla-профиль моды ставить нельзя — нужен Forge/NeoForge
+  const vanilla = ctx.activeProfile?.loader === "vanilla";
+  const canInstall = !!ctx.activeProfile && !vanilla;
+  const installBlockedTitle = !ctx.activeProfile
+    ? "Сначала создайте профиль"
+    : vanilla
+      ? "Профиль Vanilla: загрузчика модов нет. Создайте профиль с Forge или NeoForge."
+      : undefined;
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -67,11 +75,14 @@ export function ModsView({ ctx }: { ctx: Ctx }) {
           <div>
             <h1 className="text-lg font-bold">Моды</h1>
             <p className="text-xs text-muted">
-              При установке обязательные зависимости (required) ставятся автоматически
+              При установке обязательные зависимости и библиотеки (required) ставятся сразу, уже установленное не дублируется
             </p>
           </div>
           {!ctx.activeProfile && (
             <Badge tone="warn">Сначала создайте профиль</Badge>
+          )}
+          {vanilla && (
+            <Badge tone="warn">Профиль Vanilla — моды недоступны</Badge>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -146,8 +157,8 @@ export function ModsView({ ctx }: { ctx: Ctx }) {
                         <Button
                           variant={isInstalled ? "outline" : "solid"}
                           className="!px-2.5 !py-1 text-xs"
-                          disabled={!ctx.activeProfile}
-                          title={!ctx.activeProfile ? "Сначала создайте профиль" : undefined}
+                          disabled={!canInstall}
+                          title={installBlockedTitle}
                           onClick={() => setInstalling(h)}
                         >
                           {isInstalled ? "Обновить" : "Установить"}

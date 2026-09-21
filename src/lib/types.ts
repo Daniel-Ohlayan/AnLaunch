@@ -1,4 +1,4 @@
-// Общие типы AnLaunch (рендерер). Соответствуют ответам main-процесса.
+// Общие типы AnLauncher (рендерер). Соответствуют ответам main-процесса.
 
 export type Loader = "vanilla" | "forge" | "neoforge";
 
@@ -97,7 +97,7 @@ export interface InstallFile {
 
 export interface InstallItem {
   key: string;
-  kind: "mod" | "dependency" | "optional";
+  kind: "mod" | "dependency";
   slug: string;
   title: string;
   projectId: string;
@@ -109,6 +109,10 @@ export interface InstallItem {
   file: InstallFile | null;
   skipped: boolean;
   note: string | null;
+  /** Мод/зависимость уже стоят в профиле — повторно не качаем. */
+  alreadyInstalled?: boolean;
+  /** Версия, которая уже стоит в профиле (для подписи «уже установлен»). */
+  installedVersionNumber?: string | null;
 }
 
 export interface ResolvePlan {
@@ -122,7 +126,8 @@ export interface ResolveParams {
   versionId?: string;
   gameVersion?: string;
   loader?: Loader;
-  optionalSlugs?: string[];
+  /** Профиль, в который ставим: по нему отсекаем уже установленное. */
+  profileId?: string;
   projectSlug?: string;
   projectTitle?: string;
 }
@@ -135,8 +140,9 @@ export interface JavaCandidate {
 
 export type InstallEvent =
   | { type: "plan"; items: InstallItem[]; errors: string[] }
-  | { type: "item"; key: string; status: "downloading" | "done" | "error" | "skipped"; error?: string }
-  | { type: "done"; installed: number; failed: number };
+  | { type: "item"; key: string; status: "downloading" | "done" | "error" | "skipped"; error?: string; note?: string }
+  | { type: "log"; line: string }
+  | { type: "done"; installed: number; failed: number; skipped?: number };
 
 export type LaunchEvent =
   | { type: "progress"; stage: string; label: string; done?: number; total?: number }
@@ -177,10 +183,9 @@ export interface LauncherApi {
     versionId?: string;
     gameVersion?: string;
     loader?: Loader;
-    optionalSlugs?: string[];
     projectSlug?: string;
     projectTitle?: string;
-  }): Promise<{ installed: number; failed: number; modsDir: string }>;
+  }): Promise<{ installed: number; failed: number; skipped: number; modsDir: string }>;
   getInstalledMods(profileId: string): Promise<InstalledMod[]>;
   uninstallMod(profileId: string, slug: string): Promise<{ removed: boolean }>;
   launchGame(profileId: string): Promise<{ ok: boolean; pid: number }>;

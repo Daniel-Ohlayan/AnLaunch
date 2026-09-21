@@ -1,7 +1,8 @@
-// Демо-режим: полная имитация API AnLaunch для просмотра в браузере
+// Демо-режим: полная имитация API AnLauncher для просмотра в браузере
 // (без Electron). Используется, когда window.anlaunch недоступен.
 // Данные вымышленные, но логика зависимостей повторяет реальную:
-// "required" зависимости устанавливаются автоматически.
+// обязательные зависимости ("required", например Fabric API) ставятся автоматически,
+// уже установленное в профиль не дублируется, опциональные не ставятся.
 
 import type {
   AuthState,
@@ -66,6 +67,17 @@ const CATALOG: DemoMod[] = [
     extraVersions: ["0.5.5"],
   },
   {
+    slug: "fabric-api",
+    title: "Fabric API",
+    description: "Библиотека для Fabric-модов: хуки, события, реестры. Нужна почти всем Fabric-модам.",
+    loaders: ["fabric"],
+    gameVersions: ALL,
+    versionNumber: "0.116.5+1.21.4",
+    downloads: 21004500,
+    followers: 32110,
+    deps: [],
+  },
+  {
     slug: "iris",
     title: "Iris Shaders",
     description: "Поддержка шейдеров: Seus, Complementary, BSL. Работает вместе с Sodium.",
@@ -74,7 +86,10 @@ const CATALOG: DemoMod[] = [
     versionNumber: "1.8.4",
     downloads: 9812300,
     followers: 30112,
-    deps: [{ slug: "sodium", type: "required" }],
+    deps: [
+      { slug: "sodium", type: "required" },
+      { slug: "fabric-api", type: "required" },
+    ],
     extraVersions: ["1.7.2", "1.6.9"],
   },
   {
@@ -259,7 +274,6 @@ async function resolveInstall(plan: ResolveParams): Promise<ResolvePlan> {
   const errors: string[] = [];
   const conflicts: string[] = [];
   const queue: string[] = [];
-  const optionalSlugs = new Set(plan.optionalSlugs || []);
 
   const add = (slug: string, kind: InstallItem["kind"], reason: string | null) => {
     if (items.has(slug)) return items.get(slug)!;
@@ -280,12 +294,24 @@ async function resolveInstall(plan: ResolveParams): Promise<ResolvePlan> {
   while (head < queue.length) {
     const cur = bySlug(queue[head++])!;
     for (const dep of cur.deps) {
+      if (dep.type === "optional") continue; // опциональные не ставим
       if (items.has(dep.slug)) continue; // дедупликация / защита от циклов
-      if (dep.type === "optional") {
-        if (optionalSlugs.has(dep.slug)) add(dep.slug, "optional", `опционально для ${cur.title}`);
-        continue;
-      }
       add(dep.slug, "dependency", `требуется ${cur.title}`);
+    }
+  }
+
+  // уже стоящее в профиле повторно не качаем (как в main-процессе лаунчера)
+  const profile = state.profiles.find((p) => p.id === plan.profileId) || null;
+  if (profile) {
+    for (const item of items.values()) {
+      const meta = profile.installed.find(
+        (m) => m.slug.toLowerCase() === item.slug.toLowerCase() || m.projectId.toLowerCase() === item.projectId.toLowerCase(),
+      );
+      if (!meta) continue;
+      item.installedVersionNumber = meta.versionNumber;
+      // основной мод пропускаем, только если стоит ровно та же версия — иначе это обновление
+      if (item.kind === "mod" && meta.versionId !== item.versionId) continue;
+      item.alreadyInstalled = true;
     }
   }
 
@@ -447,16 +473,40 @@ export function createDemoApi(): LauncherApi {
 
     async installMod(params) {
       const profile = state.profiles.find((p) => p.id === params.profileId) || demoProfile();
+      if (profile.loader === "vanilla") {
+        throw new Error("В Vanilla-профиль моды не устанавливаются. Создайте профиль с Forge или NeoForge.");
+      }
+      const log = (line: string) => emit("install", { type: "log", line } satisfies InstallEvent);
       const plan = await resolveInstall(params);
       emit("install", { type: "plan", items: plan.items, errors: plan.errors });
+
+      const mainItem = plan.items.find((i) => i.kind === "mod");
+      const toInstall = plan.items.filter((i) => !i.alreadyInstalled && !i.skipped);
+      const depsCount = toInstall.filter((i) => i.kind === "dependency").length;
+      log(`[AnLauncher] Установка «${mainItem?.title ?? params.projectSlug}» в профиль «${profile.name}» (${profile.gameVersion} · ${profile.loader} ${profile.loaderVersion})`);
+      log(
+        `[AnLauncher] Файлов к загрузке: ${toInstall.length}` +
+          (depsCount ? `, из них обязательных зависимостей и библиотек: ${depsCount} — ставятся автоматически` : "") +
+          (plan.items.length !== toInstall.length ? `, уже в профиле: ${plan.items.length - toInstall.length}` : ""),
+      );
+
       let installed = 0;
       let failed = 0;
+      let skipped = 0;
       for (const item of plan.items) {
+        if (item.alreadyInstalled) {
+          skipped++;
+          const was = item.installedVersionNumber ? ` · v${item.installedVersionNumber}` : "";
+          emit("install", { type: "item", key: item.key, status: "skipped", note: `уже в профиле${was}` } satisfies InstallEvent);
+          log(`[AnLauncher] Уже в профиле, пропускаем: ${item.title}${item.installedVersionNumber ? " v" + item.installedVersionNumber : ""}`);
+          continue;
+        }
         emit("install", { type: "item", key: item.key, status: "downloading" } satisfies InstallEvent);
         await delay(450 + Math.random() * 500);
         if (item.skipped) {
-          emit("install", { type: "item", key: item.key, status: "skipped" } satisfies InstallEvent);
           failed++;
+          emit("install", { type: "item", key: item.key, status: "skipped", note: item.note ?? "нет файла для загрузки" } satisfies InstallEvent);
+          log(`[AnLauncher] Пропущено: ${item.title} — ${item.note ?? "нет файла для загрузки"}`);
           continue;
         }
         emit("install", { type: "item", key: item.key, status: "done" } satisfies InstallEvent);
@@ -470,9 +520,11 @@ export function createDemoApi(): LauncherApi {
           versionNumber: item.versionNumber,
           filename: item.file!.filename,
         });
+        log(`[AnLauncher] Доставлено: ${item.title} v${item.versionNumber} (${item.reason ?? "основной мод"})`);
       }
-      emit("install", { type: "done", installed, failed } satisfies InstallEvent);
-      return { installed, failed, modsDir: `${state.config.gameDir}\\instances\\${profile.name}\\mods` };
+      log(`[AnLauncher] Готово: доставлено ${installed}, уже было ${skipped}, ошибок ${failed}`);
+      emit("install", { type: "done", installed, failed, skipped } satisfies InstallEvent);
+      return { installed, failed, skipped, modsDir: `${state.config.gameDir}\\instances\\${profile.name}\\mods` };
     },
 
     async getInstalledMods(profileId) {

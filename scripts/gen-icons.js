@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Генерирует иконки AnLaunch без внешних зависимостей:
+ * Генерирует иконки AnLauncher без внешних зависимостей:
  *   public/icon.png  — 256×256 PNG
  *   build/icon.ico   — ICO (PNG-вложение, поддерживается Windows 10+/electron-builder)
  *

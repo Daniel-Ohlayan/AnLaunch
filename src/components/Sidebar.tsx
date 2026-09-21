@@ -31,7 +31,7 @@ export function Sidebar({
       <div className="flex items-center gap-3 border-b border-line px-4 py-4">
         <img src="icon.png" alt="" className="h-10 w-10 rounded-xl" />
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-bold tracking-wide">AnLaunch</div>
+          <div className="truncate text-[15px] font-bold tracking-wide">AnLauncher</div>
           <div className="text-[11px] text-muted">
             {demo ? "демо-режим · " : ""}
             <span className="text-accent">v{version}</span>

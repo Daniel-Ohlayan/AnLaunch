@@ -22,7 +22,7 @@ const headers = {
   Authorization: `token ${token}`,
   Accept: 'application/vnd.github+json',
   'X-GitHub-Api-Version': '2022-11-28',
-  'User-Agent': `AnLaunch/${pkg.version}`,
+  'User-Agent': `AnLauncher/${pkg.version}`,
 };
 
 async function apiFetch(url, opts = {}) {

@@ -1,12 +1,13 @@
 'use strict';
 /**
- * AnLaunch — Electron main process.
+ * AnLauncher — Electron main process.
  *
  * Ответственности:
  *  - окно приложения, конфиг, профили
  *  - Modrinth API: поиск модов, версий, РЕКУРСИВНОЕ разрешение обязательных
- *    зависимостей (dependency_type: "required" / "alternative") и их установка
- *    вместе с модом — как на Modrinth
+ *    зависимостей и библиотек (dependency_type: "required" / "alternative") и их
+ *    установка вместе с модом — как на Modrinth. Опциональные зависимости
+ *    ("optional") не ставятся, уже установленное в профиле не дублируется
  *  - Mojang API: версии, ассеты, библиотеки, natives, запуск игры
  *  - Forge / NeoForge профили через install-эндпоинт Modrinth
  *  - Авторизация: offline + Microsoft (OAuth2 + PKCE, loopback-редирект)
@@ -48,7 +49,7 @@ function request(url, { method = 'GET', headers = {}, body = null, timeout = 300
       {
         method,
         timeout,
-        headers: { 'User-Agent': `AnLaunch/${pkg.version}`, 'Accept': 'application/json, */*', ...headers },
+        headers: { 'User-Agent': `AnLauncher/${pkg.version}`, 'Accept': 'application/json, */*', ...headers },
       },
       (res) => {
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects > 0) {
@@ -162,6 +163,30 @@ function saveConfigNow(cfg) {
 const profileDir = (cfg, p) => path.join(cfg.gameDir, 'instances', p.name);
 const profileModsDir = (cfg, p) => path.join(profileDir(cfg, p), 'mods');
 
+/**
+ * AnLaunch → AnLauncher: Electron держит конфиг и токены в userData по имени
+ * приложения, поэтому один раз переносим их из папки с прежним именем, чтобы у
+ * тех, кто уже пользовался лаунчером, не слетели профили и аккаунт.
+ */
+function migrateLegacyUserData() {
+  try {
+    const current = app.getPath('userData');
+    const legacy = path.join(path.dirname(current), 'AnLaunch');
+    if (path.resolve(legacy) === path.resolve(current) || !fs.existsSync(legacy)) return;
+    fs.mkdirSync(current, { recursive: true });
+    for (const file of ['config.json', 'auth.json']) {
+      const from = path.join(legacy, file);
+      const to = path.join(current, file);
+      if (fs.existsSync(from) && !fs.existsSync(to)) {
+        fs.copyFileSync(from, to);
+        console.log(`[AnLauncher] Настройки перенесены из прежней папки: ${from}`);
+      }
+    }
+  } catch (e) {
+    console.error('[AnLauncher] Не удалось перенести данные прежней версии:', e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Окно
 // ---------------------------------------------------------------------------
@@ -172,7 +197,7 @@ function createWindow() {
     height: 780,
     minWidth: 1000,
     minHeight: 620,
-    title: 'AnLaunch',
+    title: 'AnLauncher',
     backgroundColor: '#0b1220',
     icon: path.join(__dirname, '..', 'public', 'icon.png'),
     webPreferences: {
@@ -248,13 +273,53 @@ async function fetchVersionForDep(dep, { gameVersion, loaders }) {
 }
 
 /**
- * ГЛАВНАЯ ФУНКЦИЯ: разбирает выбранный мод и ВСЕ его обязательные зависимости
- * (рекурсивно, с защитой от циклов и дубликатов) — аналогично тому, как
- * Modrinth показывает "required" на странице мода.
+ * Что уже стоит в профиле: метаданные profile.installed + реальные файлы в mods/.
+ * Нужно, чтобы не качать одно и то же дважды (например, Fabric API уже пришёл как
+ * зависимость другого мода) и не плодить дубликаты jar-ов.
+ */
+function installedIndex(cfg, profile) {
+  const modsDir = profileModsDir(cfg, profile);
+  const byKey = new Map();
+  for (const m of profile.installed || []) {
+    if (m.projectId) byKey.set(String(m.projectId).toLowerCase(), m);
+    if (m.slug) byKey.set(String(m.slug).toLowerCase(), m);
+  }
+  return {
+    modsDir,
+    /**
+     * @returns {{ meta: object|null, onDisk: boolean, sameVersion: boolean }|null}
+     *          null — этого мода в профиле нет
+     */
+    find(item) {
+      const meta = byKey.get(String(item.projectId).toLowerCase()) || byKey.get(String(item.slug).toLowerCase()) || null;
+      if (meta) {
+        return {
+          meta,
+          onDisk: !meta.filename || fs.existsSync(path.join(modsDir, meta.filename)),
+          sameVersion: String(meta.versionId || '') === String(item.versionId || ''),
+        };
+      }
+      // метаданных нет, но файл с таким именем уже лежит в mods/ (поставлен вручную)
+      if (item.file && fs.existsSync(path.join(modsDir, item.file.filename))) {
+        return { meta: null, onDisk: true, sameVersion: false };
+      }
+      return null;
+    },
+  };
+}
+
+/**
+ * ГЛАВНАЯ ФУНКЦИЯ: разбирает выбранный мод и ВСЕ его обязательные зависимости и
+ * библиотеки (рекурсивно, с защитой от циклов и дубликатов) — аналогично тому,
+ * как Modrinth показывает "required" на странице мода. Опциональные зависимости
+ * ("optional") в план не попадают.
+ *
+ * Позиции, которые уже стоят в профиле (profileId), помечаются
+ * alreadyInstalled — их не качаем повторно.
  *
  * @returns {{ items: Array, conflicts: string[], errors: string[] }}
  */
-async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, optionalSlugs = [], projectSlug, projectTitle }) {
+async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, projectSlug, projectTitle, profileId }) {
   const loaders = loader && loader !== 'vanilla' ? [loader] : [];
   const items = new Map(); // versionId -> item
   const byProject = new Map(); // projectId -> item
@@ -266,7 +331,7 @@ async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, o
     if (items.has(version.id)) return items.get(version.id);
     const item = {
       key: version.id,
-      kind, // 'mod' | 'dependency' | 'optional'
+      kind, // 'mod' | 'dependency'
       slug: slug || version.slug || version.project_slug || '',
       title: title || version.title || version.name || slug || version.id,
       projectId: version.project_id || projectId || version.id,
@@ -278,6 +343,9 @@ async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, o
       file: null,
       skipped: false,
       note: null,
+      alreadyInstalled: false, // уже есть в профиле — повторно не качаем
+      installedVersionNumber: null, // что именно уже стоит
+      previousFilename: null, // старый файл, который надо убрать при обновлении
     };
     const files = (version.files || []).filter((f) => f.primary !== false);
     const primary = files.find((f) => f.primary) || files[0];
@@ -362,6 +430,7 @@ async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, o
     for (const dep of version.dependencies || []) {
       const type = dep.dependency_type;
       if (type === 'incompatible' || type === 'included') continue;
+      if (type === 'optional') continue; // опциональные не ставим — как на сайте Modrinth
       if (dep.version_type === 'incompatible') continue;
 
       const exists = byProject.get(dep.project_id) || findBySlug(dep.project_slug);
@@ -371,19 +440,6 @@ async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, o
       const depMeta = await projectMeta(dep.project_id);
       const depSlug = dep.project_slug || depMeta.slug;
       const depTitle = depMeta.title || depSlug;
-
-      if (type === 'optional') {
-        if (optionalSlugs.includes(dep.project_slug)) {
-          const dv = await fetchVersionForDep(dep, { gameVersion, loaders }).catch(() => null);
-          if (dv) {
-            const it = addItem(dv, { kind: 'optional', reason: `опционально для ${parentTitle}`, slug: depSlug, title: depTitle });
-            checkIncompatibility(dv, it);
-          } else {
-            errors.push(`Не найдена опциональная зависимость: ${depSlug}`);
-          }
-        }
-        continue;
-      }
 
       if (type === 'alternative') {
         const dv = await fetchVersionForDep(dep, { gameVersion, loaders }).catch(() => null);
@@ -404,6 +460,27 @@ async function resolveInstallPlan({ projectId, versionId, gameVersion, loader, o
       } else {
         errors.push(`Не найдена обязательная зависимость: ${depSlug} (для ${parentTitle})`);
       }
+    }
+  }
+
+  // Что уже стоит в профиле — повторно не качаем и не дублируем.
+  const cfg = loadConfig();
+  const profile = profileId ? cfg.profiles.find((p) => p.id === profileId) : null;
+  if (profile) {
+    const index = installedIndex(cfg, profile);
+    for (const item of items.values()) {
+      const found = index.find(item);
+      if (!found) continue;
+      item.installedVersionNumber = found.meta ? found.meta.versionNumber || null : null;
+      // основной мод: пропускаем только если стоит ровно та же версия, иначе это обновление
+      if (item.kind === 'mod' && !found.sameVersion) {
+        if (found.onDisk && found.meta && item.file && found.meta.filename !== item.file.filename) {
+          item.previousFilename = found.meta.filename; // старый файл уберём после установки новой версии
+        }
+        continue;
+      }
+      if (!found.onDisk) continue; // в метаданных есть, а файла нет — ставим заново
+      item.alreadyInstalled = true;
     }
   }
 
@@ -764,7 +841,7 @@ async function launchGame(profileId, emit) {
     auth_xuid: '',
     version_uuid: crypto.randomUUID(),
     natives_directory: nativesDirs.join(CLASSPATH_SEP) || nativesRoot,
-    launcher_name: 'AnLaunch',
+    launcher_name: 'AnLauncher',
     launcher_version: pkg.version,
     classpath: classpath.join(CLASSPATH_SEP),
   };
@@ -797,7 +874,7 @@ async function launchGame(profileId, emit) {
   if (profile.customArgs) game.push(...profile.customArgs.trim().split(/\s+/));
 
   emit({ type: 'progress', stage: 'start', label: 'Запускаем Minecraft…' });
-  emit({ type: 'log', line: `[AnLaunch] ${java} | ${vjson.id} | RAM ${ram}МБ` });
+  emit({ type: 'log', line: `[AnLauncher] ${java} | ${vjson.id} | RAM ${ram}МБ` });
 
   const logsDir = path.join(instDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
@@ -821,7 +898,7 @@ async function launchGame(profileId, emit) {
   gameProc.stdout.on('data', onOut);
   gameProc.stderr.on('data', onOut);
   gameProc.on('error', (e) => {
-    emit({ type: 'log', line: `[AnLaunch] Ошибка запуска: ${e.message}` });
+    emit({ type: 'log', line: `[AnLauncher] Ошибка запуска: ${e.message}` });
     emit({ type: 'state', state: 'exited', code: -1 });
     gameProc = null;
   });
@@ -957,11 +1034,11 @@ function startMsLogin(clientId) {
             const err = u.searchParams.get('error');
             if (err) {
               res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-              res.end('<h2>AnLaunch: вход отклонён (ошибка Microsoft)</h2><p>Можно закрыть это окно.</p>');
+              res.end('<h2>AnLauncher: вход отклонён (ошибка Microsoft)</h2><p>Можно закрыть это окно.</p>');
               finish(new Error('Microsoft: ' + err));
             } else if (code) {
               res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-              res.end('<h2>AnLaunch: вход выполнен</h2><p>Можно закрыть это окно и вернуться к лаунчеру.</p>');
+              res.end('<h2>AnLauncher: вход выполнен</h2><p>Можно закрыть это окно и вернуться к лаунчеру.</p>');
               finish(null, code);
             } else {
               res.writeHead(400);
@@ -1208,20 +1285,28 @@ function registerIpc() {
     return resolveInstallPlan(plan);
   });
 
-  ipcMain.handle('mods:install', async (_e, { profileId, projectId, versionId, gameVersion, loader, optionalSlugs, projectSlug, projectTitle }) => {
+  ipcMain.handle('mods:install', async (_e, { profileId, projectId, versionId, gameVersion, loader, projectSlug, projectTitle }) => {
     const cfg = loadConfig();
     const profile = cfg.profiles.find((p) => p.id === profileId);
     if (!profile) throw new Error('Выберите профиль, в который ставить мод');
+    if (!profile.loader || profile.loader === 'vanilla') {
+      throw new Error('В Vanilla-профиль моды не устанавливаются. Создайте профиль с Forge или NeoForge.');
+    }
     const emit = (ev) => send('evt:install', ev);
+    // лог установки: в окно лаунчера и в консоль (с префиксом лаунчера)
+    const log = (line) => {
+      console.log(line);
+      emit({ type: 'log', line });
+    };
 
     const plan = await resolveInstallPlan({
       projectId,
       versionId,
       gameVersion: gameVersion || profile.gameVersion,
       loader: loader || profile.loader,
-      optionalSlugs: optionalSlugs || [],
       projectSlug,
       projectTitle,
+      profileId,
     });
     if (plan.conflicts.length) {
       throw new Error('Конфликт зависимостей: ' + plan.conflicts.join('; '));
@@ -1229,19 +1314,47 @@ function registerIpc() {
     emit({ type: 'plan', items: plan.items, errors: plan.errors });
 
     const modsDir = profileModsDir(cfg, profile);
+    const mainItem = plan.items.find((i) => i.kind === 'mod');
+    const loaderLabel = profile.loader && profile.loader !== 'vanilla' ? ` · ${profile.loader} ${profile.loaderVersion || ''}`.trimEnd() : '';
+    log(`[AnLauncher] Установка «${(mainItem && mainItem.title) || projectTitle || projectSlug}» в профиль «${profile.name}» (${profile.gameVersion}${loaderLabel})`);
+
+    const toInstall = plan.items.filter((i) => !i.alreadyInstalled && !i.skipped && i.file);
+    const requiredCount = toInstall.filter((i) => i.kind === 'dependency').length;
+    log(
+      `[AnLauncher] Файлов к загрузке: ${toInstall.length}` +
+        (requiredCount
+          ? `, из них обязательных зависимостей и библиотек: ${requiredCount} — ставятся автоматически`
+          : '') +
+        (plan.items.length !== toInstall.length ? `, уже в профиле: ${plan.items.length - toInstall.length}` : ''),
+    );
+
     let installed = 0;
     let failed = 0;
+    let skipped = 0;
     const installedMeta = [];
     for (const item of plan.items) {
-      if (item.skipped) {
-        emit({ type: 'item', key: item.key, status: 'skipped' });
+      if (item.alreadyInstalled) {
+        skipped++;
+        const was = item.installedVersionNumber ? ` · v${item.installedVersionNumber}` : '';
+        emit({ type: 'item', key: item.key, status: 'skipped', note: `уже в профиле${was}` });
+        log(`[AnLauncher] Уже в профиле, пропускаем: ${item.title}${item.installedVersionNumber ? ' v' + item.installedVersionNumber : ''}`);
+        continue;
+      }
+      if (item.skipped || !item.file) {
         failed++;
+        emit({ type: 'item', key: item.key, status: 'skipped', note: item.note || 'нет файла для загрузки' });
+        log(`[AnLauncher] Пропущено: ${item.title} — ${item.note || 'нет файла для загрузки'}`);
         continue;
       }
       emit({ type: 'item', key: item.key, status: 'downloading' });
       try {
         const dest = path.join(modsDir, item.file.filename);
         await downloadFile(item.file.url, dest, { expectedSha1: item.file.sha1, expectedSha512: item.file.sha512 });
+        // обновление версии: старый файл того же мода убираем, чтобы не было дублей в mods/
+        if (item.previousFilename && item.previousFilename !== item.file.filename) {
+          await fsp.rm(path.join(modsDir, item.previousFilename), { force: true }).catch(() => {});
+          log(`[AnLauncher] Удалён старый файл: ${item.previousFilename}`);
+        }
         emit({ type: 'item', key: item.key, status: 'done' });
         installed++;
         installedMeta.push({
@@ -1252,17 +1365,36 @@ function registerIpc() {
           versionNumber: item.versionNumber,
           filename: item.file.filename,
         });
+        log(`[AnLauncher] Доставлено: ${item.title} v${item.versionNumber} (${item.reason || 'основной мод'})`);
       } catch (e) {
         failed++;
-        emit({ type: 'item', key: item.key, status: 'error', error: String((e && e.message) || e) });
+        const msg = String((e && e.message) || e);
+        emit({ type: 'item', key: item.key, status: 'error', error: msg });
+        log(`[AnLauncher] Ошибка загрузки: ${item.title} — ${msg}`);
       }
     }
-    // обновляем список установленных в профиле
-    profile.installed = (profile.installed || []).filter((m) => !installedMeta.some((i) => i.slug === m.slug));
-    profile.installed.push(...installedMeta);
+
+    // обновляем список установленного в профиле (без дублей по slug)
+    const freshKeys = new Set();
+    for (const m of installedMeta) {
+      freshKeys.add(String(m.slug).toLowerCase());
+      freshKeys.add(String(m.projectId).toLowerCase());
+    }
+    const keep = [];
+    const seen = new Set();
+    for (const m of profile.installed || []) {
+      const slug = String(m.slug || '').toLowerCase();
+      if (!slug || seen.has(slug)) continue; // дубликаты в метаданных
+      if (freshKeys.has(slug) || freshKeys.has(String(m.projectId || '').toLowerCase())) continue; // заменено новой версией
+      seen.add(slug);
+      keep.push(m);
+    }
+    profile.installed = [...keep, ...installedMeta];
     saveConfigNow(cfg);
-    emit({ type: 'done', installed, failed });
-    return { installed, failed, modsDir };
+
+    log(`[AnLauncher] Готово: доставлено ${installed}, уже было ${skipped}, ошибок ${failed}`);
+    emit({ type: 'done', installed, failed, skipped });
+    return { installed, failed, skipped, modsDir };
   });
 
   ipcMain.handle('mods:installed', (_e, profileId) => {
@@ -1340,6 +1472,7 @@ if (!gotLock) {
     }
   });
   app.whenReady().then(() => {
+    migrateLegacyUserData();
     registerIpc();
     createWindow();
     // попытка тихого обновления токена Microsoft

@@ -9,7 +9,7 @@ const crypto = require('crypto');
 
 const pkg = require('../package.json');
 const releaseDir = path.join(__dirname, '..', 'release');
-const exeName = `AnLaunch-Setup-${pkg.version}.exe`;
+const exeName = `AnLauncher-Setup-${pkg.version}.exe`;
 const exePath = path.join(releaseDir, exeName);
 
 if (!fs.existsSync(exePath)) {

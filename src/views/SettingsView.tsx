@@ -52,7 +52,7 @@ export function SettingsView({ ctx }: { ctx: Ctx }) {
         <div>
           <h1 className="text-lg font-bold">Настройки</h1>
           <p className="text-xs text-muted">
-            AnLaunch v{ctx.version} · платформа: {ctx.platform}
+            AnLauncher v{ctx.version} · платформа: {ctx.platform}
             {!isElectron && <Badge tone="warn"> демо-режим в браузере</Badge>}
           </p>
         </div>
@@ -140,9 +140,10 @@ export function SettingsView({ ctx }: { ctx: Ctx }) {
         </div>
 
         <p className="pb-4 text-[11px] leading-5 text-muted/60">
-          Анварч (AnLaunch) — кастомный лаунчер для Minecraft. Моды загружаются с Modrinth: при установке мода его
-          обязательные зависимости (required) подтягиваются и устанавливаются автоматически, опциональные — только по
-          желанию. Версии Forge/NeoForge берутся из install-профилей Modrinth.
+          Анварч (AnLauncher) — кастомный лаунчер для Minecraft. Моды загружаются с Modrinth: при установке мода его
+          обязательные зависимости и библиотеки (required), например Fabric API, ставятся сразу вместе с модом; уже
+          установленное в профиле повторно не скачивается, опциональные зависимости не ставятся. В Vanilla-профиль моды
+          не устанавливаются. Версии Forge/NeoForge берутся из install-профилей Modrinth.
         </p>
       </div>
     </div>

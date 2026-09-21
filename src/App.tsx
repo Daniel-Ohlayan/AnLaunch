@@ -26,8 +26,8 @@ export interface Ctx {
 function LoadingScreen({ error }: { error: string | null }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4">
-      <img src="icon.png" alt="AnLaunch" className="h-16 w-16 rounded-2xl" />
-      <div className="text-lg font-semibold">AnLaunch</div>
+      <img src="icon.png" alt="AnLauncher" className="h-16 w-16 rounded-2xl" />
+      <div className="text-lg font-semibold">AnLauncher</div>
       {error ? (
         <div className="max-w-sm text-center text-sm text-danger">{error}</div>
       ) : (

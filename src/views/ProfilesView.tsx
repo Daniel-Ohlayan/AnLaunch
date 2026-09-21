@@ -156,7 +156,7 @@ export function ProfilesView({ ctx }: { ctx: Ctx }) {
                 />
               </Field>
               <Field label="Доп. аргументы JVM/игре">
-                <input className={inputCls} value={selected.customArgs} placeholder="-Dminecraft.launcher.brand=anlaunch" onChange={(e) => update({ customArgs: e.target.value })} />
+                <input className={inputCls} value={selected.customArgs} placeholder="-Dminecraft.launcher.brand=anlauncher" onChange={(e) => update({ customArgs: e.target.value })} />
               </Field>
             </div>
 
@@ -191,7 +191,7 @@ export function ProfilesView({ ctx }: { ctx: Ctx }) {
               </div>
               {selected.installed.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-sm text-muted">
-                  Модно пока нет. Перейдите во вкладку «Моды» — обязательные зависимости установятся вместе с модом автоматически.
+                  Модов пока нет. Перейдите во вкладку «Моды» — обязательные зависимости установятся вместе с модом автоматически.
                 </div>
               ) : (
                 <div className="space-y-1.5">
