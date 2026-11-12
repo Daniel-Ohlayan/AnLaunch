@@ -4,6 +4,7 @@ release/*
 !release/AnLauncher-Setup-1.1.0.exe
 !release/AnLaunch-Setup-1.1.0.exe
 !release/latest.yml
+!release/exe-icon.png
 *.log
 .DS_Store
 build/staging
