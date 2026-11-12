@@ -1,5 +1,11 @@
 node_modules
 dist
-release
+release/*
+!release/AnLauncher-Setup-1.1.0.exe
+!release/AnLaunch-Setup-1.1.0.exe
+!release/latest.yml
 *.log
 .DS_Store
+build/staging
+build/app.7z
+build/installer-config.txt
