@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b1220;
+  --color-panel: #101a30;
+  --color-panel-2: #15213c;
+  --color-panel-3: #1b2a4d;
+  --color-line: #223154;
+  --color-ink: #e8eefb;
+  --color-muted: #93a4c7;
+  --color-accent: #22d3ee;
+  --color-accent-2: #818cf8;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --font-sans: "Segoe UI", "Inter", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* тонкий скроллбар */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3b63 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3b63;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* анимация появления модалок */
+@keyframes al-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.al-modal {
+  animation: al-fade-in 0.16s ease-out;
+}
+
+@keyframes al-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.al-pulse {
+  animation: al-pulse 1.2s ease-in-out infinite;
+}

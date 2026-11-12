@@ -1,12 +1,12 @@
 {
-  "name": "anlaunch",
-  "productName": "AnLaunch",
+  "name": "anlauncher",
+  "productName": "AnLauncher",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.1.0",
   "main": "electron/main.js",
   "build": {
     "appId": "com.anlaunch.launcher",
-    "productName": "AnLaunch",
+    "productName": "AnLauncher",
     "publish": [
       {
         "provider": "github",
@@ -20,6 +20,7 @@
     "dev:vite": "npx vite",
     "preview": "npx vite preview",
     "build": "npx vite build",
+    "test": "node --test tests/*.test.js",
     "electron:dev": "node scripts/dev.js",
     "electron:build": "npx vite build && npx electron-builder --config electron-builder.json --win --x64 --publish never && node scripts/ensure-latest-yml.js && node scripts/upload-github-assets.js",
     "electron:start": "npx electron ."
@@ -38,6 +39,7 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "7zip-bin": "^5.2.0",
     "electron": "^41.7.1",
     "electron-builder": "^26.15.3",
     "tailwindcss": "4.1.17",
