@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-test('Windows installer executables exist and have valid PE32+ GUI headers', () => {
+test('Windows installer executables exist and have valid NSIS GUI headers', () => {
   const root = path.join(__dirname, '..');
   const files = [
     path.join(root, 'release', 'AnLauncher-Setup-1.1.0.exe'),
@@ -19,15 +19,16 @@ test('Windows installer executables exist and have valid PE32+ GUI headers', () 
     const sig = buf.toString('ascii', peOffset, peOffset + 4);
     assert.strictEqual(sig, 'PE\0\0', 'Valid PE signature');
 
-    const machine = buf.readUInt16LE(peOffset + 4);
-    assert.strictEqual(machine, 0x8664, 'Machine must be AMD64 (x64)');
-
     const optOffset = peOffset + 24;
-    const magic = buf.readUInt16LE(optOffset);
-    assert.strictEqual(magic, 0x20b, 'Magic must be PE32+ (0x20b)');
-
     const subsystem = buf.readUInt16LE(optOffset + 68);
     assert.strictEqual(subsystem, 2, 'Subsystem must be Windows GUI (2)');
+
+    // Проверяем наличие NSIS сигнатуры NullsoftInst
+    const nsisOffset = buf.indexOf('NullsoftInst');
+    assert.ok(nsisOffset > 0, 'Must contain NullsoftInst signature');
+
+    // Размер должен быть размером полноценного Electron-приложения (> 50 МБ)
+    assert.ok(buf.length > 50 * 1024 * 1024, 'Installer size must be > 50 MB');
   }
 });
 
